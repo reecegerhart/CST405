@@ -1,67 +1,60 @@
-# Topic 1 — Compiler Design Phases
+# Lexer — Phase 1: Lexical Analysis
 
-**Week 1 · Sep 8 – Sep 13, 2026**
+A hand-built scanner (Flex) for a small C-like language, generating a stream of typed tokens from source text. This is the first stage of a larger compiler pipeline:
 
-What the six phases are, and the first one built for real.
-
----
-
-## What you are given
-
-This folder is a **working compiler**. Build it before you change anything:
-
-```bash
-cd lexer
-make
+```
+scanner -> parser -> ast -> semantic -> tac -> codegen
+^^^^^^^  you are here
 ```
 
-- `tokens.h` — the token kinds, and the counters the scanner maintains
-- `main.c` — the driver that prints the token table and the summary
-- `Makefile`, and six test files under `tests/`
+The scanner's job is vocabulary only — recognizing that `count`, `=`, `1`, `;` are valid pieces of the language. It says nothing about whether those pieces form a legal sentence; that's the parser's job in the next phase.
 
-## What you are building
+## Files
 
-- `scanner.l` — every rule, in the order the TODO comments give
-- `tokenName()` and `tokenCategory()` in `main.c`
+| File | Purpose |
+|---|---|
+| `tokens.h` | Token kind enum (`TokenKind`), shared globals (`lineNo`, `colNo`, `tokenCount`, `lexErrorCount`), scanner interface |
+| `scanner.l` | Flex source — the rules that turn characters into tokens |
+| `main.c` | Driver — reads a file, calls `yylex()` until EOF, prints a token table and summary |
+| `Makefile` | Builds `lexer` from `scanner.l` + `main.c` |
+| `tests/*.cm` | Sample source files exercising specific behaviors |
 
-Every place you need to write something is marked `TODO (Topic 1)` in the source,
-with the guidance you need at that spot. Work through them in the order they appear
-in the file — they are ordered deliberately.
-
-```bash
-grep -rn "TODO (Topic 1)" lexer
-```
-
-## Building and testing
+## Building
 
 ```bash
-cd lexer
-make                                   # build ./lexer
-make test                              # run the lexer over every tests/*.cm
-make clean                             # remove everything make produced
-
-./lexer tests/01_all_tokens.cm                # the full token table
-./lexer tests/01_all_tokens.cm -c             # counts and summary only
-echo $?                                # 0 = lexically clean, 1 = errors found
+make          # builds ./lexer
+make test     # runs ./lexer over every tests/*.cm
+make clean    # removes build artifacts
 ```
 
-The exit status matters: it is what lets a script tell success from failure without
-reading the output.
+## Running
 
-## You are done when
+```bash
+./lexer <source-file>        # full token table + summary
+./lexer <source-file> -c     # summary only, no table
+```
 
-- `make test` reports 0 errors for tests 01–04
-- `./lexer tests/05_lexical_errors.cm` reports **four** errors and exits 1
-- `./lexer tests/06_unterminated_comment.cm` reports one error and exits 1
+Each table row shows: token number, line, column, token name, lexeme, and category (keyword, identifier, operator, delimiter, etc.).
 
-## The rest of this topic
+## Exit status
 
-- **Lecture notes** — `../../docs/topic-1-lexical-analysis/lecture-notes.html`
-- **Class activities** — `../../docs/topic-1-lexical-analysis/` (one per class meeting)
-- **The assignment** — `../../docs/topic-1-lexical-analysis/Topic-1-Project-1.docx`
-- **Grammar reference** — `../../docs/C-Minus-Grammar-Reference.md`
+| Code | Meaning |
+|---|---|
+| `0` | No lexical errors — source is lexically valid |
+| `1` | At least one lexical error (all reported with line/column) |
+| `2` | Source file could not be opened |
 
-## Requirements
+## What the scanner recognizes
 
-`flex`, `bison`, `gcc`, `make`, and [SPIM](http://spimsimulator.sourceforge.net/)
-or QtSPIM to run the generated assembly.
+- **Keywords**: `int print return if else while for switch case default break`
+- **Identifiers / numbers**: `{letter}({letter}|{digit})*`, `{digit}+`
+- **Operators**: arithmetic (`+ - * /`), relational (`< > <= >= == !=`), logical (`&& || !`), assignment (`=`)
+- **Delimiters**: `; : , ( ) { } [ ]`
+- **Comments**: `//` to end of line, `/* ... */` spanning multiple lines (contents are skipped, not tokenized)
+- **Errors**: any other character is reported with its line/column and counted in `lexErrorCount`, but scanning continues so every bad character in a file is reported in one run
+- **Unterminated `/*`**: reported once, at the position the comment opened
+
+## Notes
+
+- Line/column tracking is manual (`lineNo`/`colNo` in `scanner.l`) — Flex tracks lines natively via `%option yylineno`, but columns need to be counted by hand for useful error messages.
+- You may see a `"/*" within comment [-Wcomment]` warning from GCC when building. This comes from the instructional prose at the top of `scanner.l` containing the literal characters `/*` inside its own comment block — it's cosmetic and doesn't affect correctness.
