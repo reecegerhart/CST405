@@ -1,0 +1,5 @@
+/* THIS FILE IS SUPPOSED TO FAIL with exactly one error: the comment on the
+ * last line ends in stars but never closes, and must be reported as ONE
+ * unterminated comment — the trailing stars must not leak out as tokens. */
+int x;
+/* never closed **

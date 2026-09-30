@@ -1,0 +1,21 @@
+/* The symbol table, isolated.
+ * Expect: 0 errors, and a symbol table with exactly 5 entries —
+ *   x, y, total, count, integer   — in that order.
+ * Every name gets ONE entry no matter how often it appears: the first
+ * sighting is an INSERT, every later one is a LOOKUP that bumps REFS.
+ * `int` and `print` are keywords and must NOT appear in the table;
+ * `integer` is an identifier and must. */
+int x;
+int y;
+int total;
+x = 5;
+y = 10;
+total = x + y + 3;
+int count;
+count = 0;
+while (count < total) { count = count + 1; }
+int integer;
+integer = count;
+print(x);
+print(y);
+print(total);

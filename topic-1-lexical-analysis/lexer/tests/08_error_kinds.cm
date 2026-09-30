@@ -1,0 +1,9 @@
+/* THIS FILE IS SUPPOSED TO FAIL — with exactly SEVEN errors, one per line
+ * below, each reported with its exact line and column.  Every kind of
+ * lexical error the scanner knows about appears once. */
+int 9lives;                 // identifier cannot start with a digit
+x = 99999999999;            // integer literal does not fit in an int
+if (a & b) { }              // single & is not an operator
+if (a | b) { }              // single | is not an operator
+print("hi");                // no string literals: two errors, one per quote
+y = 1 # 2;                  // # is not in the language
