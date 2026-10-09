@@ -75,7 +75,7 @@ ASTNode* root = NULL;
  *   %type <node> program stmt_list stmt decl assign expr print_stmt
  * (bison rejects a %type for a non-terminal that has no rules yet,
  *  which is why only `program` is listed to begin with) */
-%type <node> program
+%type <node> program stmt_list stmt decl assign expr print_stmt
 
 /* OPERATOR PRECEDENCE AND ASSOCIATIVITY
  * Listed from lowest to highest precedence.
@@ -145,19 +145,15 @@ ASTNode* root = NULL;
 /* A placeholder so that `make` succeeds before you have written anything.
  * It accepts exactly one program — the empty one — and builds no tree.
  * Delete it as soon as you have a real `program` rule. */
-program:
-    /* empty */ { root = NULL; }
+
+
+program
+    : stmt_list                 { root = $1; $$ = $1; }
     ;
 
-%type <node> program stmt_list stmt decl assign expr print_stmt
-
-program 
-    : stmt_list                 { root = $1; $$ = $1; }
-    ; 
-
 stmt_list
-    : stmt                      { $$ = $1 }
-    | stmt_list                 { $$ = createStmtList($1, $2); }
+    : stmt                      { $$ = $1; }
+    | stmt_list stmt            { $$ = createStmtList($1, $2); }
     ;
 
 stmt
@@ -167,7 +163,7 @@ stmt
     ;
 
 decl
-    : INT ID ';'                { $$ = createDecl("int", $2); free($2) }
+    : INT ID ';'                { $$ = createDecl("int", $2); free($2); }
     ;
 
 assign
@@ -176,7 +172,7 @@ assign
 
 print_stmt
     : PRINT '(' expr ')' ';'    { $$ = createPrint($3); }
-    ;  
+    ;
 
 expr
     : NUM                       { $$ = createNum($1); }
