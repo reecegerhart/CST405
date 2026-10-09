@@ -200,7 +200,32 @@ static void checkExpr(ASTNode* node) {
      * Increment semInfo.errorCount for each error.  Do NOT stop at the first
      * one: report everything you can find in a single run.
      * ---------------------------------------------------------------- */
-    (void)node;
+     if (!node) return;
+
+    switch (node->type) {
+        case NODE_NUM:
+            break;  /* a literal is always valid */
+
+        case NODE_VAR:
+            if (!isVarDeclaredInScope(node->data.name)) {
+                fprintf(stderr, "\n╔════════════════════════════════════════════════════════════╗\n");
+                fprintf(stderr, "║ SEMANTIC ERROR - Undeclared Variable                      ║\n");
+                fprintf(stderr, "╚════════════════════════════════════════════════════════════╝\n");
+                fprintf(stderr, "  📍 Location: Line %d\n", node->lineno);
+                fprintf(stderr, "  ❌ Error: '%s' is used but never declared\n", node->data.name);
+                fprintf(stderr, "  💡 Suggestion: declare it before this line, for example 'int %s;'\n\n", node->data.name);
+                semInfo.errorCount++;
+            }
+            break;
+
+        case NODE_BINOP:
+            checkExpr(node->data.binop.left);
+            checkExpr(node->data.binop.right);
+            break;
+
+        default:
+            break;
+    }
 }
 
 /* Check statement */
@@ -221,7 +246,59 @@ static void checkStmt(ASTNode* node) {
      * (a form this language does not have — but think about it) it should not.
      * Languages differ here, and this is where that decision gets made.
      * ---------------------------------------------------------------- */
-    (void)node;
+     if (!node) return;
+
+    switch (node->type) {
+        case NODE_DECL: {
+            char* name = node->data.decl.name;
+
+            if (isReservedName(name)) {
+                reportReserved(name, node->lineno);
+                semInfo.errorCount++;
+                break;
+            }
+
+            if (addVarToScope(name) == -1) {
+                fprintf(stderr, "\n╔════════════════════════════════════════════════════════════╗\n");
+                fprintf(stderr, "║ SEMANTIC ERROR - Duplicate Declaration                    ║\n");
+                fprintf(stderr, "╚════════════════════════════════════════════════════════════╝\n");
+                fprintf(stderr, "  📍 Location: Line %d\n", node->lineno);
+                fprintf(stderr, "  ❌ Error: '%s' is already declared in this scope\n", name);
+                fprintf(stderr, "  💡 Suggestion: remove the second declaration or use a different name\n\n");
+                semInfo.errorCount++;
+            }
+            break;
+        }
+
+        case NODE_ASSIGN: {
+            char* var = node->data.assign.var;
+
+            if (var && !isVarDeclaredInScope(var)) {
+                fprintf(stderr, "\n╔════════════════════════════════════════════════════════════╗\n");
+                fprintf(stderr, "║ SEMANTIC ERROR - Undeclared Variable                      ║\n");
+                fprintf(stderr, "╚════════════════════════════════════════════════════════════╝\n");
+                fprintf(stderr, "  📍 Location: Line %d\n", node->lineno);
+                fprintf(stderr, "  ❌ Error: cannot assign to '%s' because it is never declared\n", var);
+                fprintf(stderr, "  💡 Suggestion: declare it first, for example 'int %s;'\n\n", var);
+                semInfo.errorCount++;
+            }
+
+            /* Check the right side even if the target failed, so every error shows in one run */
+            checkExpr(node->data.assign.value);
+            break;
+        }
+
+        case NODE_PRINT:
+            checkExpr(node->data.expr);
+            break;
+
+        case NODE_STMT_LIST:
+            checkStmtList(node);
+            break;
+
+        default:
+            break;
+    }
 }
 
 /* Check statement list */

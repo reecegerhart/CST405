@@ -93,7 +93,7 @@ ASTNode* root = NULL;
 %left '+' '-'
 %left '*' '/'
 
-%%
+%% 
 
 /* --------------------------------------------------------------------
  * TODO (Topic 2) — THE GRAMMAR
@@ -149,9 +149,41 @@ program:
     /* empty */ { root = NULL; }
     ;
 
-/* TODO: write your grammar rules here. */
+%type <node> program stmt_list stmt decl assign expr print_stmt
 
+program 
+    : stmt_list                 { root = $1; $$ = $1; }
+    ; 
 
+stmt_list
+    : stmt                      { $$ = $1 }
+    | stmt_list                 { $$ = createStmtList($1, $2); }
+    ;
+
+stmt
+    : decl
+    | assign
+    | print_stmt
+    ;
+
+decl
+    : INT ID ';'                { $$ = createDecl("int", $2); free($2) }
+    ;
+
+assign
+    : ID '=' expr ';'           { $$ = createAssign($1, $3); free($1); }
+    ;
+
+print_stmt
+    : PRINT '(' expr ')' ';'    { $$ = createPrint($3); }
+    ;  
+
+expr
+    : NUM                       { $$ = createNum($1); }
+    | ID                        { $$ = createVar($1); free($1); }
+    | expr '+' expr             { $$ = createBinOp('+', $1, $3); }
+    ;
+ 
 %%
 
 /* ERROR HANDLING */
