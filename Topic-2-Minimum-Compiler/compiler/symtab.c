@@ -101,7 +101,12 @@ int addVar(char* name, char* type) {
      *
      * findIn() and appendTo() above do the searching and the allocation.
      * ---------------------------------------------------------------- */
-    return -1;
+     if (findIn(&locals, name)) return -1;   /* already declared in this frame */
+
+    Symbol* s = appendTo(&locals, name, type);
+    s->offset = locals.nextOffset;
+    locals.nextOffset += 4;                 /* one int = 4 bytes */
+    return s->offset;
 }
 
 int addArray(char* name, int size) {
@@ -171,8 +176,9 @@ Symbol* lookupSymbol(const char* name) {
      * what makes an inner declaration shadow an outer one, and it is the
      * entire implementation of scoping at this milestone.
      * ---------------------------------------------------------------- */
-    (void)name;
-    return NULL;
+     Symbol* s = findIn(&locals, name);
+    if (s) return s;                        /* local wins, so it shadows a global */
+    return findIn(&globals, name);          /* NULL if not found anywhere */
 }
 
 int getVarOffset(char* name) {
