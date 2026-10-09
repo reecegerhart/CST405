@@ -6,6 +6,9 @@ A whole compiler, end to end, for the smallest language worth compiling.
 
 ---
 
+## Testing 
+The given tests were substantinal for this project and therefore we did not need to create anymore 
+
 ## What you are given
 
 This folder is a **working compiler**. Build it before you change anything:
