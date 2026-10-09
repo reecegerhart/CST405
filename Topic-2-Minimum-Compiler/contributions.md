@@ -4,7 +4,7 @@
 
 ### `ast.c`
 
-**Remaining AST Constructors**
+**THE REMAINING AST CONSTRUCTORS**
 
 Implement the following constructors: `createBinOp`, `createDecl`, `createAssign`, `createPrint`, and `createStmtList`.
 
@@ -16,7 +16,7 @@ The `createStmtList` constructor requires special attention because the grammar 
 
 ### `codegen.c`
 
-**TAC to MIPS Code Generation**
+**TAC -> MIPS**
 
 Implement MIPS instruction generation for each TAC opcode.
 
@@ -38,7 +38,7 @@ Use `operandReg` when reading values and `defReg` when writing values. Using the
 
 ### `semantic.c`
 
-**Statement Semantic Analysis**
+**CHECK A STATEMENT**
 
 Implement statement checking for the following AST node types:
 
@@ -51,7 +51,7 @@ The order of checking matters. For example, in `int x; x = x + 1;`, the declarat
 
 ### `symtab.c`
 
-**Name Resolution**
+**RESOLVE A NAME**
 
 Implement name resolution by returning the symbol associated with a variable name, or `NULL` if the variable is not declared.
 
@@ -59,7 +59,7 @@ Search the local symbol table first, followed by the global symbol table. This o
 
 ### `tac.c`
 
-**Statement to Three Address Code Generation**
+**STATEMENT -> THREE-ADDRESS CODE**
 
 Implement TAC generation for statement nodes.
 
