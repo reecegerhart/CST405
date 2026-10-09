@@ -90,7 +90,7 @@ void initSymTab(void) {
 
 int addVar(char* name, char* type) {
     /* ----------------------------------------------------------------
-     * TODO (Topic 2) — DECLARE A VARIABLE
+     * TODO (Topic 2) — DECLARE A VARIABLE Reece 
      * Add `name` to the local table and give it a home in the frame.
      * Return the byte offset you assigned, or -1 if the name is already
      * declared — the caller uses -1 to report a duplicate declaration.
@@ -165,7 +165,7 @@ int addGlobalArray(char* name, int size) {
 
 Symbol* lookupSymbol(const char* name) {
     /* ----------------------------------------------------------------
-     * TODO (Topic 2) — RESOLVE A NAME
+     * TODO (Topic 2) — RESOLVE A NAME  Stili
      * Return the symbol for `name`, or NULL if it is not declared.
      * Search the LOCAL table first and the GLOBAL table second: that order is
      * what makes an inner declaration shadow an outer one, and it is the

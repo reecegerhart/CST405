@@ -434,7 +434,7 @@ void generateMIPSFromTAC(const char* filename) {
 
         for (TACInstr* i = c->next; i && i->op != TAC_FUNC_END; i = i->next) {
             /* --------------------------------------------------------
-             * TODO (Topic 2) — TAC -> MIPS
+             * TODO (Topic 2) — TAC -> MIPS Stili
              * One case per TAC opcode.  Everything you need is already written above:
              *
              *     operandReg(name)   register holding that value (loads it, or does

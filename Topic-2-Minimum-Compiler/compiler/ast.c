@@ -50,7 +50,7 @@ ASTNode* createVar(char* name) {
 }
 
 /* --------------------------------------------------------------------
- * TODO (Topic 2) — THE REMAINING AST CONSTRUCTORS
+ * TODO (Topic 2) — THE REMAINING AST CONSTRUCTORS    Stili
  * createNum and createVar above are the pattern.  Every constructor does
  * the same four things:
  *
@@ -77,7 +77,7 @@ ASTNode* createVar(char* name) {
 /* Display the AST structure (for debugging and education) */
 void printAST(ASTNode* node, int level) {
     /* ----------------------------------------------------------------
-     * TODO (Topic 2) — THE TREE PRINTER
+     * TODO (Topic 2) — THE TREE PRINTER Reece
      * Print the tree, one node per line, indented two spaces per level.
      *
      *     if (!node) return;

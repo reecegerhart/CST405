@@ -139,7 +139,7 @@ static void generateTACStmt(ASTNode* node);
 /* Generate TAC for expression - returns the temp/var holding result */
 char* generateTACExpr(ASTNode* node) {
     /* ----------------------------------------------------------------
-     * TODO (Topic 2) — EXPRESSION -> THREE-ADDRESS CODE
+     * TODO (Topic 2) — EXPRESSION -> THREE-ADDRESS CODE Reece
      * Return the NAME of the location holding this expression's value.  That
      * return value is the whole contract, and it is what makes the recursion
      * work: a caller does not care whether it gets back a literal, a variable
@@ -181,7 +181,7 @@ static void generateTACStmtList(ASTNode* node) {
 /* Generate TAC for a statement */
 static void generateTACStmt(ASTNode* node) {
     /* ----------------------------------------------------------------
-     * TODO (Topic 2) — STATEMENT -> THREE-ADDRESS CODE
+     * TODO (Topic 2) — STATEMENT -> THREE-ADDRESS CODE Stili
      *     NODE_DECL    emit TAC_DECL — no code runs, but the back end needs to
      *                  know the variable exists so it can reserve a slot
      *     NODE_ASSIGN  evaluate the expression, then emit TAC_ASSIGN
@@ -499,7 +499,7 @@ static TACList copyList(const TACList* src) {
  * -----------------------------------------------------------------------*/
 static TACList optimizePass(TACList* in) {
     /* ----------------------------------------------------------------
-     * TODO (Topic 2) — ONE OPTIMIZATION PASS
+     * TODO (Topic 2) — ONE OPTIMIZATION PASS Reece
      * Copy `in` to `out`, rewriting what you can along the way.  Start with
      * the two transformations that pay off immediately on this language:
      *
