@@ -92,4 +92,50 @@ void printAST(ASTNode* node, int level) {
      * Phase 2, and every bug you hit for the rest of the semester gets
      * diagnosed by staring at its output.  Write it early and make it good.
      * ---------------------------------------------------------------- */
+    if (!node) return;
+ 
+    switch (node->type) {
+        case NODE_NUM:
+            printIndent(level);
+            printf("Num: %d\n", node->data.num);
+            break;
+ 
+        case NODE_VAR:
+            printIndent(level);
+            printf("Var: %s\n", node->data.name);
+            break;
+ 
+        case NODE_BINOP:
+            printIndent(level);
+            printf("BinOp: %s\n", opText(node->data.binop.op));
+            printAST(node->data.binop.left, level + 1);
+            printAST(node->data.binop.right, level + 1);
+            break;
+ 
+        case NODE_DECL:
+            printIndent(level);
+            printf("Decl: %s %s\n", node->data.decl.varType, node->data.decl.name);
+            break;
+ 
+        case NODE_ASSIGN:
+            printIndent(level);
+            printf("Assign: %s\n", node->data.assign.var ? node->data.assign.var : "(null)");
+            printAST(node->data.assign.value, level + 1);
+            break;
+ 
+        case NODE_PRINT:
+            printIndent(level);
+            printf("Print\n");
+            printAST(node->data.expr, level + 1);
+            break;
+ 
+        case NODE_STMT_LIST:
+            /* A list is a sequence, not a nesting: no line of its own,
+             * and both children stay at the same level. */
+            printAST(node->data.stmtlist.stmt, level);
+            printAST(node->data.stmtlist.next, level);
+            break;
+    }
+    
+
 }
