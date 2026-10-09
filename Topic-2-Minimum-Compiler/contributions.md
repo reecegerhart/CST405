@@ -2,6 +2,27 @@
 
 ## Reece Gerhart
 
+### `parser.y`
+
+**Syntax Analysis and Grammar Implementation**
+
+Implement the grammar rules for the starter language using Bison. Define how tokens and expressions form valid statements, and build the abstract syntax tree through semantic actions.
+
+Implement the following grammar rules:
+
+* `program`: Accept a statement list, assign it to the global `root`, and return the AST.
+* `stmt_list`: Support individual statements and left recursive lists of statements using `createStmtList`.
+* `stmt`: Accept declarations, assignments, and print statements.
+* `decl`: Recognize integer declarations using `INT ID ';'` and create declaration nodes with `createDecl`.
+* `assign`: Recognize assignments using `ID '=' expr ';'` and create assignment nodes with `createAssign`.
+* `expr`: Recognize integer literals, identifiers, and addition expressions. Use `createNum`, `createVar`, and `createBinOp` to construct the corresponding AST nodes.
+* `print_stmt`: Recognize print statements using `PRINT '(' expr ')' ';'` and create print nodes with `createPrint`.
+
+Free identifier strings returned by the scanner after passing them to AST constructors, since the constructors duplicate the strings. Ensure that `root` points to the completed AST after successful parsing.
+
+Maintain the existing operator precedence declarations and syntax error handler. Consider adding error productions to provide more descriptive messages for common syntax errors, such as missing semicolons.
+
+
 ### `semantic.c`
 
 **Expression and Statement Semantic Analysis**
