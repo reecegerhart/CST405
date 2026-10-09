@@ -206,7 +206,7 @@ static void checkExpr(ASTNode* node) {
 /* Check statement */
 static void checkStmt(ASTNode* node) {
     /* ----------------------------------------------------------------
-     * TODO (Topic 2) — CHECK A STATEMENT  Stili
+     * TODO (Topic 2) — CHECK A STATEMENT  Reece
      *     NODE_DECL    the name must NOT already be declared in this scope.
      *                  On success, add it: addVarToScope(name).
      *     NODE_ASSIGN  the target must already be declared; then check the

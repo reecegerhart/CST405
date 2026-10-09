@@ -165,7 +165,7 @@ int addGlobalArray(char* name, int size) {
 
 Symbol* lookupSymbol(const char* name) {
     /* ----------------------------------------------------------------
-     * TODO (Topic 2) — RESOLVE A NAME  Stili
+     * TODO (Topic 2) — RESOLVE A NAME  reece
      * Return the symbol for `name`, or NULL if it is not declared.
      * Search the LOCAL table first and the GLOBAL table second: that order is
      * what makes an inner declaration shadow an outer one, and it is the
