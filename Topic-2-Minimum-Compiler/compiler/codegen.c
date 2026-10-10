@@ -471,6 +471,91 @@ void generateMIPSFromTAC(const char* filename) {
              *   code still works — just with an extra `lw` everywhere.  Reading your
              *   own output and spotting that is a genuinely good exercise.
              * -------------------------------------------------------- */
+
+            /* Literals are emitted as immediates (li / add) rather than
+             * being given a $t register of their own.  The cache evicts
+             * home-less values first, so a literal parked in a register can
+             * be thrown out by the very next operand of the same instruction. */
+            switch (i->op) {
+                case TAC_DECL: {
+                    Symbol* s = lookupSymbol(i->result);
+                    if (s) fprintf(out, "    # %s %s lives at %d($sp)\n",
+                                   s->type, s->name, s->offset);
+                    break;
+                }
+
+                case TAC_ASSIGN:
+                    if (isConstant(i->arg1)) {
+                        int d = defReg(i->result);
+                        fprintf(out, "    li   $t%d, %s            # %s = %s\n",
+                                d, i->arg1, i->result, i->arg1);
+                    } else {
+                        int a = operandReg(i->arg1);
+                        int d = defReg(i->result);
+                        fprintf(out, "    move $t%d, $t%d          # %s = %s\n",
+                                d, a, i->result, i->arg1);
+                    }
+                    break;
+
+                case TAC_ADD:
+                    if (isConstant(i->arg1) || isConstant(i->arg2)) {
+                        /* Addition commutes, so the literal can always be
+                         * the immediate, whichever side it was written on. */
+                        const char* name = isConstant(i->arg2) ? i->arg1 : i->arg2;
+                        const char* imm  = isConstant(i->arg2) ? i->arg2 : i->arg1;
+                        int a = operandReg(name);
+                        int d = defReg(i->result);
+                        /* `add` rather than `addi`: SPIM rejects an addi
+                         * immediate outside 16 bits, but expands add. */
+                        fprintf(out, "    add  $t%d, $t%d, %s      # %s = %s + %s\n",
+                                d, a, imm, i->result, i->arg1, i->arg2);
+                    } else {
+                        int a = operandReg(i->arg1);
+                        int b = operandReg(i->arg2);
+                        int d = defReg(i->result);
+                        fprintf(out, "    %-4s $t%d, $t%d, $t%d    # %s = %s + %s\n",
+                                mnemonicFor(i->op), d, a, b,
+                                i->result, i->arg1, i->arg2);
+                    }
+                    break;
+
+                case TAC_PRINT:
+                    if (isConstant(i->arg1))
+                        fprintf(out, "    li   $a0, %s            # print %s\n",
+                                i->arg1, i->arg1);
+                    else
+                        fprintf(out, "    move $a0, $t%d          # print %s\n",
+                                operandReg(i->arg1), i->arg1);
+                    fprintf(out, "    li   $v0, 1              # syscall 1 = print integer\n");
+                    fprintf(out, "    syscall\n");
+                    fprintf(out, "    la   $a0, __nl           # then a newline\n");
+                    fprintf(out, "    li   $v0, 4              # syscall 4 = print string\n");
+                    fprintf(out, "    syscall\n");
+                    break;
+
+                case TAC_RETURN:
+                    if (i->arg1) {
+                        if (isConstant(i->arg1))
+                            fprintf(out, "    li   $v0, %s            # return %s\n",
+                                    i->arg1, i->arg1);
+                        else
+                            fprintf(out, "    move $v0, $t%d          # return %s\n",
+                                    operandReg(i->arg1), i->arg1);
+                    }
+                    /* The jump skips the flush after this loop, so write
+                     * live values back here. */
+                    flushRegisters("return");
+                    fprintf(out, "    j    %s__epilogue\n", funcLabel(currentFunc));
+                    break;
+
+                default: {
+                    char text[256];
+                    formatTAC(i, text, sizeof text);
+                    fprintf(stderr, "codegen: no MIPS translation yet for '%s' "
+                                    "(in function '%s')\n", text, currentFunc);
+                    exit(1);
+                }
+            }
         }
 
         flushRegisters("end of function body");
