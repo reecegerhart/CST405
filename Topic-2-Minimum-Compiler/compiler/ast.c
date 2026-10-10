@@ -73,6 +73,83 @@ ASTNode* createVar(char* name) {
  * program before you write it.
  * -------------------------------------------------------------------- */
 
+/* Create a binary operation node */
+ASTNode* createBinOp(char op, ASTNode* left, ASTNode* right) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_BINOP;
+    node->lineno = yylineno;
+    node->data.binop.op = op;
+    node->data.binop.left = left;
+    node->data.binop.right = right;
+    return node;
+}
+
+/* Create a variable declaration node */
+ASTNode* createDecl(char* type, char* name) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_DECL;
+    node->lineno = yylineno;
+    node->data.decl.varType = strdup(type);  /* Copy the type name */
+    node->data.decl.name = strdup(name);     /* Copy the variable name */
+    return node;
+}
+
+/* Create an assignment node */
+ASTNode* createAssign(char* var, ASTNode* value) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_ASSIGN;
+    node->lineno = yylineno;
+    node->data.assign.var = strdup(var);  /* Copy the target name */
+    node->data.assign.value = value;
+    return node;
+}
+
+/* Create a print node */
+ASTNode* createPrint(ASTNode* expr) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_PRINT;
+    node->lineno = yylineno;
+    node->data.expr = expr;
+    return node;
+}
+
+/* Create a statement list node.
+ * The grammar is left recursive, so stmt1 is the list built so far and
+ * stmt2 is the statement being added.  For  s1 s2 s3  the tree leans left:
+ *
+ *            LIST
+ *           /    \
+ *        LIST     s3
+ *       /    \
+ *      s1     s2
+ *
+ * Visiting `stmt` before `next` therefore walks the statements in source
+ * order. */
+ASTNode* createStmtList(ASTNode* stmt1, ASTNode* stmt2) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_STMT_LIST;
+    node->lineno = yylineno;
+    node->data.stmtlist.stmt = stmt1;  /* The list so far */
+    node->data.stmtlist.next = stmt2;  /* The new statement */
+    return node;
+}
+
+/* Text form of an operator code, for the tree printer */
+const char* opText(char op) {
+    switch (op) {
+        case '+': return "+";
+        case '-': return "-";
+        case '*': return "*";
+        case '/': return "/";
+        default:  return "?";
+    }
+}
+
+/* Indent two spaces per nesting level */
+static void printIndent(int level) {
+    for (int i = 0; i < level; i++) printf("  ");
+}
+
 
 /* Display the AST structure (for debugging and education) */
 void printAST(ASTNode* node, int level) {

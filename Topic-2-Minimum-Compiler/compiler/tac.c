@@ -135,6 +135,23 @@ void appendOptimizedTAC(TACInstr* instr) {
 /* Forward declarations */
 static void generateTACStmt(ASTNode* node);
 
+/* Is this name a compiler temporary (t0, t1, ...)?  freeTemp() only looks at
+ * the first letter and the digits after it, so a user variable such as
+ * `total` would be mistaken for t0.  Checking the whole shape first keeps a
+ * live temporary from being released by accident. */
+static int isTempName(const char* s) {
+    if (!s || s[0] != 't' || !s[1]) return 0;
+    for (int i = 1; s[i]; i++)
+        if (!isdigit((unsigned char)s[i])) return 0;
+    return 1;
+}
+
+/* Finished with an operand name returned by generateTACExpr: hand a
+ * temporary back to the allocator, then free the string itself. */
+static void releaseOperand(char* name) {
+    if (isTempName(name)) freeTemp(name);
+    free(name);
+}
 
 /* Generate TAC for expression - returns the temp/var holding result */
 char* generateTACExpr(ASTNode* node) {
@@ -162,8 +179,45 @@ char* generateTACExpr(ASTNode* node) {
      * four, or if a temporary number is reused while still live, print the
      * TAC and walk it by hand — that listing is the point of this phase.
      * ---------------------------------------------------------------- */
-    (void)node;
-    return NULL;
+    if (!node) return NULL;
+
+    switch (node->type) {
+        case NODE_NUM: {
+            char* literal = malloc(16);
+            snprintf(literal, 16, "%d", node->data.num);
+            return literal;
+        }
+
+        case NODE_VAR:
+            return strdup(node->data.name);
+
+        case NODE_BINOP: {
+            TACOp op;
+            switch (node->data.binop.op) {
+                case '+': op = TAC_ADD; break;
+                case '-': op = TAC_SUB; break;
+                case '*': op = TAC_MUL; break;
+                case '/': op = TAC_DIV; break;
+                default:
+                    fprintf(stderr, "TAC: unknown operator '%c' at line %d\n",
+                            node->data.binop.op, node->lineno);
+                    exit(1);
+            }
+
+            char* t     = allocTemp();
+            char* left  = generateTACExpr(node->data.binop.left);
+            char* right = generateTACExpr(node->data.binop.right);
+            appendTAC(createTAC(op, left, right, t));
+
+            /* Only now are the operands dead */
+            releaseOperand(left);
+            releaseOperand(right);
+            return t;
+        }
+
+        default:
+            return NULL;
+    }
 }
 
 /* Generate TAC for statement list */
@@ -190,7 +244,36 @@ static void generateTACStmt(ASTNode* node) {
      *
      * Use appendTAC(createTAC(op, arg1, arg2, result)) to emit.
      * ---------------------------------------------------------------- */
-    (void)node;
+    if (!node) return;
+
+    switch (node->type) {
+        case NODE_DECL:
+            /* layoutFrame() reads the type from arg1 and the name from result */
+            appendTAC(createTAC(TAC_DECL, node->data.decl.varType, NULL,
+                                node->data.decl.name));
+            break;
+
+        case NODE_ASSIGN: {
+            char* value = generateTACExpr(node->data.assign.value);
+            appendTAC(createTAC(TAC_ASSIGN, value, NULL, node->data.assign.var));
+            releaseOperand(value);
+            break;
+        }
+
+        case NODE_PRINT: {
+            char* value = generateTACExpr(node->data.expr);
+            appendTAC(createTAC(TAC_PRINT, value, NULL, NULL));
+            releaseOperand(value);
+            break;
+        }
+
+        case NODE_STMT_LIST:
+            generateTACStmtList(node);
+            break;
+
+        default:
+            break;
+    }
 }
 
 void generateTAC(ASTNode* node) {
@@ -493,6 +576,32 @@ static TACList copyList(const TACList* src) {
     return d;
 }
 
+/* Opcodes of the form  result = arg1 op arg2  — the ones foldConstants()
+ * can evaluate when both operands are literals. */
+static int isBinaryOp(TACOp op) {
+    switch (op) {
+        case TAC_ADD: case TAC_SUB: case TAC_MUL: case TAC_DIV:
+        case TAC_LT:  case TAC_GT:  case TAC_LE:  case TAC_GE:
+        case TAC_EQ:  case TAC_NE:  case TAC_AND: case TAC_OR:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+/* CONSTANT PROPAGATION on one operand: if it names something known to hold
+ * a constant at this point, replace the name with the constant. */
+static void propagateConstant(char** operand) {
+    if (!*operand || isConstantNumber(*operand)) return;
+    const char* value = lookupFact(*operand, 1);
+    if (!value) return;
+
+    free(*operand);
+    *operand = strdup(value);
+    optStats.constProp++;
+    changesThisPass++;
+}
+
 /* -------------------------------------------------------------------------
  * One optimization pass over `in`, producing `out`.
  * Returns the number of changes made.
@@ -523,8 +632,54 @@ static TACList optimizePass(TACList* in) {
      * run again, and in the matching optStats field so main.c can report it.
      * ---------------------------------------------------------------- */
     TACList out = { NULL, NULL, in->tempCount, in->labelCount };
+    clearFacts();
+
     for (TACInstr* c = in->head; c; c = c->next) {
         TACInstr* n = createTAC(c->op, c->arg1, c->arg2, c->result);
+
+        /* Control can reach a label from anywhere, and a function starts
+         * with nothing known: forget everything. */
+        if (n->op == TAC_LABEL || n->op == TAC_FUNC_BEGIN) clearFacts();
+
+        /* CONSTANT PROPAGATION — only into operands that are read as values.
+         * Other opcodes use arg1/arg2 for types, labels and function names. */
+        int binary = isBinaryOp(n->op);
+        if (binary || n->op == TAC_NEG || n->op == TAC_NOT ||
+            n->op == TAC_ASSIGN || n->op == TAC_PRINT || n->op == TAC_RETURN)
+            propagateConstant(&n->arg1);
+        if (binary)
+            propagateConstant(&n->arg2);
+
+        /* CONSTANT FOLDING — both operands literal: do the arithmetic now and
+         * turn the instruction into a plain  result = value. */
+        if (binary) {
+            int folded;
+            char* value = foldConstants(n->op, n->arg1, n->arg2, &folded);
+            if (folded) {
+                free(n->arg1);
+                free(n->arg2);
+                n->op   = TAC_ASSIGN;
+                n->arg1 = value;
+                n->arg2 = NULL;
+                optStats.constFold++;
+                changesThisPass++;
+            }
+        }
+
+        /* Update what is known.  A constant assignment teaches us a fact;
+         * anything else that writes a name makes its old fact stale.  The
+         * fact points at strings owned by `n`, which lives on in `out`. */
+        if (n->op == TAC_ASSIGN && isConstantNumber(n->arg1)) {
+            recordFact(n->result, n->arg1, 1);
+        } else if (n->op == TAC_CALL) {
+            dropNonTempFacts();              /* a call may change any global */
+            if (n->result) dropFactsAbout(n->result);
+        } else if (n->result && (binary || n->op == TAC_ASSIGN ||
+                                 n->op == TAC_NEG || n->op == TAC_NOT ||
+                                 n->op == TAC_ARRAY_LOAD)) {
+            dropFactsAbout(n->result);
+        }
+
         if (!out.head) out.head = out.tail = n;
         else { out.tail->next = n; out.tail = n; }
     }
