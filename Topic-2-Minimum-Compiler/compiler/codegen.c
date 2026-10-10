@@ -472,7 +472,7 @@ void generateMIPSFromTAC(const char* filename) {
              *   own output and spotting that is a genuinely good exercise.
              * -------------------------------------------------------- */
 
-            /* Literals are emitted as immediates (li / addi) rather than
+            /* Literals are emitted as immediates (li / add) rather than
              * being given a $t register of their own.  The cache evicts
              * home-less values first, so a literal parked in a register can
              * be thrown out by the very next operand of the same instruction. */
@@ -505,7 +505,9 @@ void generateMIPSFromTAC(const char* filename) {
                         const char* imm  = isConstant(i->arg2) ? i->arg2 : i->arg1;
                         int a = operandReg(name);
                         int d = defReg(i->result);
-                        fprintf(out, "    addi $t%d, $t%d, %s      # %s = %s + %s\n",
+                        /* `add` rather than `addi`: SPIM rejects an addi
+                         * immediate outside 16 bits, but expands add. */
+                        fprintf(out, "    add  $t%d, $t%d, %s      # %s = %s + %s\n",
                                 d, a, imm, i->result, i->arg1, i->arg2);
                     } else {
                         int a = operandReg(i->arg1);
