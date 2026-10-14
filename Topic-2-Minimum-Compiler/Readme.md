@@ -1,7 +1,7 @@
 # Topic 2 — Mini Compiler for a Starter Language
 
 **CST-405 Compiler Design · Grand Canyon University · Project 2**
-**Team:** Reece Gerhart and Stili
+**Team:** Reece Gerhart and Stylianos Regas
 
 ## 1. What this project is
 
@@ -192,14 +192,14 @@ In `t2_05`, the semicolon is missing at the end of line 7 (`x = 5`). The parser 
 | Member | Files and responsibilities |
 |---|---|
 | **Reece Gerhart** | `parser.y` (all grammar rules and AST-building actions); `semantic.c` (expression and statement checking, duplicate and undeclared errors); `symtab.c` (declaration with stack offsets, name lookup with local-over-global shadowing) |
-| **Stili** | `ast.c` (constructors and `printAST`); `tac.c` (TAC generation, constant folding and propagation); `codegen.c` (TAC-to-MIPS instruction selection) |
+| **Stylianos Regas** | `ast.c` (constructors and `printAST`); `tac.c` (TAC generation, constant folding and propagation); `codegen.c` (TAC-to-MIPS instruction selection) |
 
 Each member also recorded an individual video that explains the code, outlines their assigned tasks, describes how the AST is used to produce TAC and MIPS, and demonstrates the compiler running.
 
 | Member | Video |
 |---|---|
 | Reece Gerhart | https://www.youtube.com/watch?v=i-XEn4M_GGU |
-| Stili | *[paste link]* |
+| Stylianos Regas | https://mygcuedu6961-my.sharepoint.com/:v:/r/personal/sregas_my_gcu_edu/Documents/Videos/Clipchamp/Video%20Project%2010/Exports/Video%20Project%2010.mp4?d=w868d91257a00412cbf62f4f2e2c0fa3e&csf=1&web=1&e=p3isCD |
 
 ## 10. Known limitations
 
