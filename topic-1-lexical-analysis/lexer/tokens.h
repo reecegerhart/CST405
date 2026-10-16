@@ -1,6 +1,8 @@
 #ifndef TOKENS_H
 #define TOKENS_H
 
+#include <stdio.h>   /* FILE, used by the yyin declaration below */
+
 /* ============================================================================
  *  TOPIC 1 · Compiler Design Phases
  * FILE: tokens.h   —   Phase 1: Lexical analysis (the vocabulary)
@@ -72,7 +74,7 @@ const char* tokenCategory(TokenKind k);
 
 /* Counters the scanner maintains and main.c reports. */
 extern int lexErrorCount;   /* Characters the language does not admit      */
-extern int tokenCount;      /* Tokens successfully recognized              */
+extern int tokenCount;      /* VALID tokens recognized (errors excluded)   */
 extern int lineNo;          /* Current line   (1-based)                    */
 extern int colNo;           /* Current column (1-based), tracked by hand   */
 
@@ -85,5 +87,21 @@ extern FILE* yyin;
 extern char lastLexeme[256];
 extern int  lastLine;
 extern int  lastCol;
+
+/* ---------------------------------------------------------------------------
+ * LEXICAL ERROR LOG
+ * Each error is printed the moment it is found, AND stored here so the
+ * driver can list every error together in the final summary.  Errors past
+ * MAX_LEX_ERRORS are still counted in lexErrorCount, just not stored.
+ * -------------------------------------------------------------------------*/
+#define MAX_LEX_ERRORS 100
+
+typedef struct {
+    int  line, col;          /* exact position where the bad text starts    */
+    char lexeme[32];         /* the offending text (truncated for display)  */
+    char message[96];        /* what is wrong with it                       */
+} LexError;
+
+extern LexError lexErrors[MAX_LEX_ERRORS];
 
 #endif

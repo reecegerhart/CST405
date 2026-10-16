@@ -1,0 +1,7 @@
+/* Exact error POSITIONS, including after tabs and non-ASCII text.
+ * Tabs advance to the next 4-column tab stop.  Expect exactly TWO errors:
+ *   line 6, column 13:  @      (after two tabs)
+ *   line 7, column 12:  the accented e, reported ONCE (not once per byte) */
+int ok;
+ok = 1;		@
+	z = café;
