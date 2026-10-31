@@ -58,6 +58,7 @@
      * TODO (Topic 3)
      * Return RETURN for the `return` keyword.
      * -------------------------------------------------------------- */
+"return"        { return RETURN; }
 
 [a-zA-Z_][a-zA-Z0-9_]* {
     yylval.str = strdup(yytext);
@@ -77,6 +78,13 @@
      * Careful: the '/' rule must not swallow the start of a comment.
      * Longest match settles it — check that it really does.
      * -------------------------------------------------------------- */
+"-"             { return '-'; }
+"*"             { return '*'; }
+"/"             { return '/'; }
+    /* Longest match: on input "//" the single-line comment rule matches 2 or
+     * more characters and "/" matches only 1, so the comment wins.  The same
+     * holds for a complete multi-line comment.  A lone "/" (division) matches
+     * only the rule above. */
 
 
 "="             { return '='; }
@@ -88,6 +96,11 @@
      * TODO (Topic 3)
      * Braces for blocks, brackets for arrays, comma for parameter lists.
      * -------------------------------------------------------------- */
+"{"             { return '{'; }
+"}"             { return '}'; }
+"["             { return '['; }
+"]"             { return ']'; }
+","             { return ','; }
 
 "//".*          { /* Skip single-line comments */ }
 "/*"([^*]|\*+[^*/])*\*+"/"  { /* Skip multi-line comments */ }

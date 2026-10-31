@@ -42,10 +42,19 @@ typedef enum {
  * The node kinds functions need: FUNC_DEF, PARAM, PARAM_LIST, FUNC_CALL,
  * ARG_LIST, RETURN.
  * -------------------------------------------------------------- */
+    NODE_FUNC_DEF,    /* Function definition */
+    NODE_PARAM,       /* Scalar parameter */
+    NODE_PARAM_LIST,  /* Linked list of parameters */
+    NODE_FUNC_CALL,   /* Function call (expression or statement) */
+    NODE_ARG_LIST,    /* Linked list of call arguments */
+    NODE_RETURN,      /* return statement */
 /* --------------------------------------------------------------
  * TODO (Topic 3)
  * And the node kinds blocks and arrays need: BLOCK, ARRAY_DECL, ARRAY_INDEX.
  * -------------------------------------------------------------- */
+    NODE_BLOCK,       /* { ... } */
+    NODE_ARRAY_DECL,  /* int a[10];  or an array parameter  int a[] */
+    NODE_ARRAY_INDEX  /* a[i] */
 } NodeType;
 
 /* AST NODE STRUCTURE
@@ -60,7 +69,7 @@ typedef struct ASTNode {
     union {
         /* Literal number value (NODE_NUM) */
         int num;
-        
+
         /* Variable reference name (NODE_VAR) */
         char* name;
 
@@ -77,16 +86,17 @@ typedef struct ASTNode {
             struct ASTNode* left;       /* Left operand */
             struct ASTNode* right;      /* Right operand */
         } binop;
-        
+
         /* Assignment structure (NODE_ASSIGN) */
         struct {
             char* var;                  /* Variable being assigned to (NULL for array) */
             struct ASTNode* value;      /* Expression being assigned */
+            struct ASTNode* arrayLHS;   /* NODE_ARRAY_INDEX target for arr[i] = ..., else NULL */
         } assign;
-        
+
         /* Print expression (NODE_PRINT) */
         struct ASTNode* expr;
-        
+
         /* Statement list structure (NODE_STMT_LIST) */
         struct {
             struct ASTNode* stmt;       /* Current statement */
@@ -102,6 +112,34 @@ typedef struct ASTNode {
  *   func_call : name, args    arg_list   : expr, next
  *   ret       : expr (NULL for a bare `return;`)
  * -------------------------------------------------------------- */
+        struct {
+            char* name;
+            struct ASTNode* params;     /* NODE_PARAM_LIST chain, or NULL */
+            struct ASTNode* body;       /* NODE_BLOCK */
+        } func_def;
+
+        struct {
+            char* name;
+        } param;
+
+        struct {
+            struct ASTNode* param;      /* NODE_PARAM or NODE_ARRAY_DECL (isParam) */
+            struct ASTNode* next;       /* next NODE_PARAM_LIST, or NULL */
+        } param_list;
+
+        struct {
+            char* name;
+            struct ASTNode* args;       /* NODE_ARG_LIST chain, or NULL */
+        } func_call;
+
+        struct {
+            struct ASTNode* expr;       /* this argument */
+            struct ASTNode* next;       /* next NODE_ARG_LIST, or NULL */
+        } arg_list;
+
+        struct {
+            struct ASTNode* expr;       /* NULL for a bare `return;` */
+        } ret;
 /* --------------------------------------------------------------
  * TODO (Topic 3)
  * Union members for blocks and arrays:
@@ -111,6 +149,20 @@ typedef struct ASTNode {
  * isParam separates `int a[10];` (reserve 40 bytes of storage) from
  * `int a[]` as a parameter (reserve 4 bytes for an address).
  * -------------------------------------------------------------- */
+        struct {
+            struct ASTNode* stmt_list;  /* may be NULL for `{ }` */
+        } block;
+
+        struct {
+            char* name;
+            int size;                   /* 0 for a parameter */
+            int isParam;                /* 1 = parameter (address), 0 = real storage */
+        } array_decl;
+
+        struct {
+            char* name;
+            struct ASTNode* index;
+        } array_index;
     } data;
 } ASTNode;
 
@@ -131,18 +183,31 @@ ASTNode* createStmtList(ASTNode* stmt1, ASTNode* stmt2);        /* Create statem
  * TODO (Topic 3)
  * Declare the constructors for the function-related nodes.
  * -------------------------------------------------------------- */
+ASTNode* createFuncDef(char* name, ASTNode* params, ASTNode* body);
+ASTNode* createParam(char* name);
+/* createParamList / createArgList append `param` / `expr` to the END of
+ * `list` and return the head.  Pass list == NULL to start a new list.
+ * Walking from the head therefore visits items in source order. */
+ASTNode* createParamList(ASTNode* list, ASTNode* param);
+ASTNode* createFuncCall(char* name, ASTNode* args);
+ASTNode* createArgList(ASTNode* list, ASTNode* expr);
+ASTNode* createReturn(ASTNode* expr);
 
 /* Control flow nodes */
 /* --------------------------------------------------------------
  * TODO (Topic 3)
  * Declare createBlock.
  * -------------------------------------------------------------- */
+ASTNode* createBlock(ASTNode* stmt_list);
 
 /* --------------------------------------------------------------
  * TODO (Topic 3)
  * Declare the array constructors.  Note createArrayParam is separate from
  * createArrayDecl: a parameter has no size and is a reference, not storage.
  * -------------------------------------------------------------- */
+ASTNode* createArrayDecl(char* name, int size);
+ASTNode* createArrayParam(char* name);
+ASTNode* createArrayIndex(char* name, ASTNode* index);
 
 /* Text form of a packed operator code (see createBinOp) */
 const char* opText(char op);

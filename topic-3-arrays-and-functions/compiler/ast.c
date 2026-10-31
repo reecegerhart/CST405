@@ -77,6 +77,7 @@ ASTNode* createAssign(char* var, ASTNode* value) {
     node->data.assign.var = var ? strdup(var) : NULL;  /* Variable name (NULL for array assignments) */
     node->data.assign.value = value;      /* Expression tree */
     /* No array subscript on the left unless the parser says so */
+    node->data.assign.arrayLHS = NULL;
     return node;
 }
 
@@ -108,6 +109,68 @@ ASTNode* createStmtList(ASTNode* stmt1, ASTNode* stmt2) {
  * the AST is deliberately boring so the phases above it can be
  * interesting.
  * -------------------------------------------------------------- */
+ASTNode* createFuncDef(char* name, ASTNode* params, ASTNode* body) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_FUNC_DEF;
+    node->lineno = yylineno;
+    node->data.func_def.name = strdup(name);
+    node->data.func_def.params = params;
+    node->data.func_def.body = body;
+    return node;
+}
+
+ASTNode* createParam(char* name) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_PARAM;
+    node->lineno = yylineno;
+    node->data.param.name = strdup(name);
+    return node;
+}
+
+/* Append `param` to the end of `list` (NULL starts a new list); returns the head. */
+ASTNode* createParamList(ASTNode* list, ASTNode* param) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_PARAM_LIST;
+    node->lineno = param ? param->lineno : yylineno;
+    node->data.param_list.param = param;
+    node->data.param_list.next = NULL;
+    if (!list) return node;
+    ASTNode* tail = list;
+    while (tail->data.param_list.next) tail = tail->data.param_list.next;
+    tail->data.param_list.next = node;
+    return list;
+}
+
+ASTNode* createFuncCall(char* name, ASTNode* args) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_FUNC_CALL;
+    node->lineno = yylineno;
+    node->data.func_call.name = strdup(name);
+    node->data.func_call.args = args;
+    return node;
+}
+
+/* Append `expr` to the end of `list` (NULL starts a new list); returns the head. */
+ASTNode* createArgList(ASTNode* list, ASTNode* expr) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_ARG_LIST;
+    node->lineno = expr ? expr->lineno : yylineno;
+    node->data.arg_list.expr = expr;
+    node->data.arg_list.next = NULL;
+    if (!list) return node;
+    ASTNode* tail = list;
+    while (tail->data.arg_list.next) tail = tail->data.arg_list.next;
+    tail->data.arg_list.next = node;
+    return list;
+}
+
+ASTNode* createReturn(ASTNode* expr) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_RETURN;
+    node->lineno = yylineno;
+    node->data.ret.expr = expr;
+    return node;
+}
 /* --------------------------------------------------------------
  * TODO (Topic 3)
  * createBlock, createArrayDecl, createArrayParam and
@@ -115,6 +178,33 @@ ASTNode* createStmtList(ASTNode* stmt1, ASTNode* stmt2) {
  * give a declared array its real size and isParam 0.  Code
  * generation later depends on telling those two apart.
  * -------------------------------------------------------------- */
+ASTNode* createBlock(ASTNode* stmt_list) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_BLOCK;
+    node->lineno = yylineno;
+    node->data.block.stmt_list = stmt_list;
+    return node;
+}
+
+ASTNode* createArrayDecl(char* name, int size) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_ARRAY_DECL;
+    node->lineno = yylineno;
+    node->data.array_decl.name = strdup(name);
+    node->data.array_decl.size = size;
+    node->data.array_decl.isParam = 0;
+    return node;
+}
+
+ASTNode* createArrayParam(char* name) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_ARRAY_DECL;
+    node->lineno = yylineno;
+    node->data.array_decl.name = strdup(name);
+    node->data.array_decl.size = 0;
+    node->data.array_decl.isParam = 1;
+    return node;
+}
 /* --------------------------------------------------------------
  * TODO (Topic 3)
  * createArrayIndex: build the node for  arr[i].  It stores the array
@@ -122,6 +212,14 @@ ASTNode* createStmtList(ASTNode* stmt1, ASTNode* stmt2) {
  * expression node, which is a simplification worth mentioning in your
  * write-up (it is what stops this language having pointers).
  * -------------------------------------------------------------- */
+ASTNode* createArrayIndex(char* name, ASTNode* index) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_ARRAY_INDEX;
+    node->lineno = yylineno;
+    node->data.array_index.name = strdup(name);
+    node->data.array_index.index = index;
+    return node;
+}
 
 /* Render an operator code as the text the programmer actually wrote.
  * The parser packs multi-character operators into single chars so that a
@@ -143,6 +241,24 @@ const char* opText(char op) {
 void printAST(ASTNode* node, int level) {
     if (!node) return;
 
+    /* List nodes are not drawn themselves: hand their items straight on at the
+     * same level so no stray indentation is printed before each item. */
+    if (node->type == NODE_STMT_LIST) {
+        printAST(node->data.stmtlist.stmt, level);
+        printAST(node->data.stmtlist.next, level);
+        return;
+    }
+    if (node->type == NODE_PARAM_LIST) {
+        printAST(node->data.param_list.param, level);
+        printAST(node->data.param_list.next, level);
+        return;
+    }
+    if (node->type == NODE_ARG_LIST) {
+        printAST(node->data.arg_list.expr, level);
+        printAST(node->data.arg_list.next, level);
+        return;
+    }
+
     /* Indent based on tree depth */
     for (int i = 0; i < level; i++) printf("  ");
 
@@ -163,13 +279,17 @@ void printAST(ASTNode* node, int level) {
             printf("DECL: %s %s\n", node->data.decl.varType, node->data.decl.name);
             break;
         case NODE_ASSIGN:
-            printf("ASSIGN: %s\n", node->data.assign.var);
+            if (node->data.assign.var) printf("ASSIGN: %s\n", node->data.assign.var);
 /* --------------------------------------------------------------
  * TODO (Topic 3)
  * An assignment now has two shapes: to a variable, or to an array
  * element.  Print them differently — a tree dump that hides the
  * difference is a tree dump you cannot debug with.
  * -------------------------------------------------------------- */
+            else {
+                printf("ASSIGN (array element):\n");
+                printAST(node->data.assign.arrayLHS, level + 1);
+            }
             for (int i = 0; i < level + 1; i++) printf("  ");
             printf("VALUE:\n");
             printAST(node->data.assign.value, level + 2);
@@ -188,9 +308,45 @@ void printAST(ASTNode* node, int level) {
  * Print the function-related nodes.  Indent children one level
  * deeper so the printed tree really looks like a tree.
  * -------------------------------------------------------------- */
+        case NODE_FUNC_DEF:
+            printf("FUNC_DEF: %s\n", node->data.func_def.name);
+            printAST(node->data.func_def.params, level + 1);
+            printAST(node->data.func_def.body, level + 1);
+            break;
+        case NODE_PARAM:
+            printf("PARAM: %s\n", node->data.param.name);
+            break;
+        case NODE_PARAM_LIST:
+            /* handled before the indent above */
+            break;
+        case NODE_FUNC_CALL:
+            printf("FUNC_CALL: %s\n", node->data.func_call.name);
+            printAST(node->data.func_call.args, level + 1);
+            break;
+        case NODE_ARG_LIST:
+            /* handled before the indent above */
+            break;
+        case NODE_RETURN:
+            printf("RETURN\n");
+            printAST(node->data.ret.expr, level + 1);
+            break;
 /* --------------------------------------------------------------
  * TODO (Topic 3)
  * Print NODE_BLOCK, NODE_ARRAY_DECL and NODE_ARRAY_INDEX.
  * -------------------------------------------------------------- */
+        case NODE_BLOCK:
+            printf("BLOCK\n");
+            printAST(node->data.block.stmt_list, level + 1);
+            break;
+        case NODE_ARRAY_DECL:
+            if (node->data.array_decl.isParam)
+                printf("ARRAY_PARAM: %s[]\n", node->data.array_decl.name);
+            else
+                printf("ARRAY_DECL: %s[%d]\n", node->data.array_decl.name, node->data.array_decl.size);
+            break;
+        case NODE_ARRAY_INDEX:
+            printf("ARRAY_INDEX: %s\n", node->data.array_index.name);
+            printAST(node->data.array_index.index, level + 1);
+            break;
     }
 }

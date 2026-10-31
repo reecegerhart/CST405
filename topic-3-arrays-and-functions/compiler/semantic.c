@@ -42,6 +42,18 @@
  * `int total(...)`.  Record just enough to check a call: the name, the
  * parameter count, and which parameters are arrays.
  * -------------------------------------------------------------- */
+typedef struct {
+    char name[64];
+    int paramCount;
+    int isArray[MAX_PARAMS];   /* 1 if that parameter is an array (int a[]) */
+} FuncInfo;
+
+static FuncInfo funcTable[MAX_FUNCTIONS];
+static int funcCount = 0;
+static int inFunction = 0;     /* 1 while a function body is being checked */
+
+static FuncInfo* findFunction(const char* name);
+static int addFunction(const char* name, int paramCount, ASTNode* params);
 
 /* Scope for variables */
 typedef struct {
@@ -66,6 +78,9 @@ void initSemantic() {
  * Registering it here is what makes `print(x)` type-check like any
  * other call instead of needing a special case.
  * -------------------------------------------------------------- */
+    funcCount = 0;
+    inFunction = 0;
+    addFunction("print", 1, NULL);
 
     trace("SEMANTIC ANALYZER: initialized\n\n");
 }
@@ -186,6 +201,39 @@ static int addVarToScope(char* name) {
  * question is different (symtab.c settles that later) but because the
  * error messages are.
  * -------------------------------------------------------------- */
+/* Report one semantic error in the same boxed format as the rest of the file,
+ * and count it.  Checking continues afterwards so several errors can be
+ * reported in one run. */
+static void semError(int lineno, const char* title, const char* error, const char* suggestion) {
+    fprintf(stderr, "\n╔════════════════════════════════════════════════════════════╗\n");
+    fprintf(stderr, "║ SEMANTIC ERROR - %s\n", title);
+    fprintf(stderr, "╚════════════════════════════════════════════════════════════╝\n");
+    fprintf(stderr, "  📍 Location: Line %d\n", lineno);
+    fprintf(stderr, "  ❌ Error: %s\n", error);
+    fprintf(stderr, "  💡 Suggestion: %s\n\n", suggestion);
+    semInfo.errorCount++;
+}
+
+/* Add an array (declared or parameter) to the current scope.
+ * Returns 0 on success, -1 after reporting an error. */
+static int addArrayToScope(char* name, int lineno) {
+    char err[256], sug[256];
+
+    if (isReservedName(name)) {
+        reportReserved(name, lineno);
+        semInfo.errorCount++;
+        return -1;
+    }
+    if (addVarToScope(name) == -1) {
+        snprintf(err, sizeof err, "Array '%s' is already declared in the current scope", name);
+        snprintf(sug, sizeof sug, "Rename the array (for example '%s2') or remove the duplicate declaration", name);
+        semError(lineno, "Duplicate Array Declaration", err, sug);
+        return -1;
+    }
+    trace("  ✓ Array '%s' declared (line %d)\n", name, lineno);
+    return 0;
+}
+
 /* Check if variable is declared in any visible scope */
 static int isVarDeclaredInScope(char* name) {
     /* Search from innermost to outermost scope */
@@ -206,6 +254,44 @@ static int isVarDeclaredInScope(char* name) {
  * the argument list at a call site.  Comparing those two numbers is the
  * whole of call checking.
  * -------------------------------------------------------------- */
+static FuncInfo* findFunction(const char* name) {
+    for (int i = 0; i < funcCount; i++) {
+        if (strcmp(funcTable[i].name, name) == 0) return &funcTable[i];
+    }
+    return NULL;
+}
+
+/* Returns 0 on success, -1 if the name is already taken, -2 if a limit is hit. */
+static int addFunction(const char* name, int paramCount, ASTNode* params) {
+    if (findFunction(name)) return -1;
+    if (funcCount >= MAX_FUNCTIONS || paramCount > MAX_PARAMS) return -2;
+
+    FuncInfo* f = &funcTable[funcCount++];
+    strncpy(f->name, name, sizeof(f->name) - 1);
+    f->name[sizeof(f->name) - 1] = '\0';
+    f->paramCount = paramCount;
+    for (int i = 0; i < MAX_PARAMS; i++) f->isArray[i] = 0;
+
+    int i = 0;
+    for (ASTNode* p = params; p && i < paramCount; p = p->data.param_list.next, i++) {
+        ASTNode* prm = p->data.param_list.param;
+        f->isArray[i] = (prm && prm->type == NODE_ARRAY_DECL);
+    }
+    return 0;
+}
+
+static int countParams(ASTNode* params) {
+    int n = 0;
+    for (ASTNode* p = params; p; p = p->data.param_list.next) n++;
+    return n;
+}
+
+static int countArgs(ASTNode* args) {
+    int n = 0;
+    for (ASTNode* a = args; a; a = a->data.arg_list.next) n++;
+    return n;
+}
+
 /* Forward declaration: checkStmt and checkStmtList are mutually recursive,
  * which is exactly what you want when the thing being checked is a tree. */
 static void checkStmtList(ASTNode* node);
@@ -247,6 +333,27 @@ static void checkExpr(ASTNode* node) {
  * expression.  A wrong argument count is the single most common mistake
  * a compiler can catch for the programmer here.
  * -------------------------------------------------------------- */
+        case NODE_FUNC_CALL: {
+            char err[256], sug[256];
+            FuncInfo* f = findFunction(node->data.func_call.name);
+            if (!f) {
+                snprintf(err, sizeof err, "Function '%s' is called but never defined", node->data.func_call.name);
+                snprintf(sug, sizeof sug, "Define 'int %s(...) { ... }' somewhere in the file, or check the spelling", node->data.func_call.name);
+                semError(node->lineno, "Undefined Function", err, sug);
+            } else {
+                int given = countArgs(node->data.func_call.args);
+                if (given != f->paramCount) {
+                    snprintf(err, sizeof err, "Function '%s' expects %d argument(s) but the call supplies %d",
+                             f->name, f->paramCount, given);
+                    snprintf(sug, sizeof sug, "Call '%s' with exactly %d argument(s)", f->name, f->paramCount);
+                    semError(node->lineno, "Wrong Number of Arguments", err, sug);
+                }
+            }
+            for (ASTNode* a = node->data.func_call.args; a; a = a->data.arg_list.next) {
+                checkExpr(a->data.arg_list.expr);
+            }
+            break;
+        }
 /* --------------------------------------------------------------
  * TODO (Topic 3)
  * Check a NODE_ARRAY_INDEX: the array must be declared, and the index is
@@ -255,6 +362,15 @@ static void checkExpr(ASTNode* node) {
  * general, and this language has no run-time check either.  Say so in
  * your write-up; it is a real design decision, not an oversight.
  * -------------------------------------------------------------- */
+        case NODE_ARRAY_INDEX:
+            if (!isVarDeclaredInScope(node->data.array_index.name)) {
+                char err[256], sug[256];
+                snprintf(err, sizeof err, "Array '%s' is used before being declared", node->data.array_index.name);
+                snprintf(sug, sizeof sug, "Declare it first, for example 'int %s[10];'", node->data.array_index.name);
+                semError(node->lineno, "Undeclared Array", err, sug);
+            }
+            checkExpr(node->data.array_index.index);
+            break;
         default:
             break;
     }
@@ -288,7 +404,7 @@ static void checkStmt(ASTNode* node) {
             break;
 
         case NODE_ASSIGN:
-                if (!isVarDeclaredInScope(node->data.assign.var)) {
+                if (node->data.assign.var && !isVarDeclaredInScope(node->data.assign.var)) {
                     fprintf(stderr, "\n╔════════════════════════════════════════════════════════════╗\n");
                     fprintf(stderr, "║ SEMANTIC ERROR - Assignment to Undeclared Variable        ║\n");
                     fprintf(stderr, "╚════════════════════════════════════════════════════════════╝\n");
@@ -299,7 +415,7 @@ static void checkStmt(ASTNode* node) {
                     fprintf(stderr, "       int %s;\n", node->data.assign.var);
                     fprintf(stderr, "  📖 Remember: Variables must be declared before use in C-minus\n\n");
                     semInfo.errorCount++;
-                } else {
+                } else if (node->data.assign.var) {
                     trace("  ✓ Assignment to '%s' is valid (line %d)\n", node->data.assign.var, node->lineno);
                 }
 /* --------------------------------------------------------------
@@ -308,6 +424,11 @@ static void checkStmt(ASTNode* node) {
  * the index expression in that case, and the variable name in the
  * other.
  * -------------------------------------------------------------- */
+            /* Array element target: checkExpr on the NODE_ARRAY_INDEX verifies
+             * the array is declared and checks the index expression. */
+            if (node->data.assign.arrayLHS) {
+                checkExpr(node->data.assign.arrayLHS);
+            }
             checkExpr(node->data.assign.value);
             break;
 
@@ -322,6 +443,14 @@ static void checkStmt(ASTNode* node) {
  * function — legal to parse, meaningless to translate.  That gap between
  * "parses" and "means something" is the territory this phase owns.
  * -------------------------------------------------------------- */
+        case NODE_RETURN:
+            if (!inFunction) {
+                semError(node->lineno, "Return Outside Function",
+                         "'return' can only appear inside a function body",
+                         "Move this statement into a function, or remove it");
+            }
+            checkExpr(node->data.ret.expr);
+            break;
 
 /* --------------------------------------------------------------
  * TODO (Topic 3)
@@ -332,6 +461,15 @@ static void checkStmt(ASTNode* node) {
  *     { int x; int x; }       same name twice in one scope
  * Handle NODE_FUNC_CALL used as a statement and NODE_STMT_LIST too.
  * -------------------------------------------------------------- */
+        case NODE_BLOCK:
+            enterScope();
+            checkStmtList(node->data.block.stmt_list);
+            exitScope();
+            break;
+
+        case NODE_FUNC_CALL:
+            checkExpr(node);
+            break;
 
         case NODE_STMT_LIST:
             /* The grammar is left-recursive, so a statement list can contain
@@ -347,6 +485,22 @@ static void checkStmt(ASTNode* node) {
  * all).  Reject `int a[0];` and `int a[-3];` here — nothing downstream
  * will.
  * -------------------------------------------------------------- */
+        case NODE_ARRAY_DECL:
+            if (node->data.array_decl.isParam) {
+                /* Parameters have no size to check; addParamsToScope inserts them. */
+                break;
+            }
+            if (node->data.array_decl.size <= 0) {
+                char err[256], sug[256];
+                snprintf(err, sizeof err, "Array '%s' is declared with size %d",
+                         node->data.array_decl.name, node->data.array_decl.size);
+                snprintf(sug, sizeof sug, "Use a positive size, for example 'int %s[10];'", node->data.array_decl.name);
+                semError(node->lineno, "Invalid Array Size", err, sug);
+            }
+            /* Still add it to scope so later uses do not cascade into
+             * "undeclared" errors. */
+            addArrayToScope(node->data.array_decl.name, node->lineno);
+            break;
         default:
             break;
     }
@@ -374,6 +528,91 @@ static void checkStmtList(ASTNode* node) {
  * LATER in the file.  Collapse them into one pass and see which programs
  * stop compiling; that experiment is worth five minutes.
  * -------------------------------------------------------------- */
+/* Put each parameter into the current (function) scope. */
+static void addParamsToScope(ASTNode* params) {
+    for (ASTNode* p = params; p; p = p->data.param_list.next) {
+        ASTNode* prm = p->data.param_list.param;
+        if (!prm) continue;
+
+        if (prm->type == NODE_ARRAY_DECL) {
+            addArrayToScope(prm->data.array_decl.name, prm->lineno);
+        } else if (prm->type == NODE_PARAM) {
+            char* name = prm->data.param.name;
+            if (isReservedName(name)) {
+                reportReserved(name, prm->lineno);
+                semInfo.errorCount++;
+            } else if (addVarToScope(name) == -1) {
+                char err[256], sug[256];
+                snprintf(err, sizeof err, "Parameter '%s' appears more than once in the parameter list", name);
+                snprintf(sug, sizeof sug, "Give each parameter a different name");
+                semError(prm->lineno, "Duplicate Parameter", err, sug);
+            }
+        }
+    }
+}
+
+/* Pass 2, one function: parameters and body share ONE scope, so a local that
+ * reuses a parameter's name is a duplicate (as in C), not a shadow. */
+static void checkFuncDef(ASTNode* node) {
+    trace("Checking function '%s' (line %d)\n", node->data.func_def.name, node->lineno);
+    enterScope();
+    addParamsToScope(node->data.func_def.params);
+
+    inFunction = 1;
+    ASTNode* body = node->data.func_def.body;
+    if (body && body->type == NODE_BLOCK) {
+        checkStmtList(body->data.block.stmt_list);
+    }
+    inFunction = 0;
+
+    exitScope();
+}
+
+/* Pass 1, one function: record its signature. */
+static void registerFunction(ASTNode* node) {
+    char err[256], sug[256];
+    int count = countParams(node->data.func_def.params);
+    int rc = addFunction(node->data.func_def.name, count, node->data.func_def.params);
+
+    if (rc == -1) {
+        snprintf(err, sizeof err, "Function '%s' is already defined", node->data.func_def.name);
+        snprintf(sug, sizeof sug, "Rename one of the functions or remove the duplicate definition");
+        semError(node->lineno, "Duplicate Function Definition", err, sug);
+    } else if (rc == -2) {
+        snprintf(err, sizeof err, "Function '%s' exceeds a compiler limit (at most %d functions and %d parameters)",
+                 node->data.func_def.name, MAX_FUNCTIONS, MAX_PARAMS);
+        snprintf(sug, sizeof sug, "Reduce the number of functions or parameters");
+        semError(node->lineno, "Compiler Limit Exceeded", err, sug);
+    } else {
+        trace("  ✓ Function '%s' registered with %d parameter(s) (line %d)\n",
+              node->data.func_def.name, count, node->lineno);
+    }
+}
+
+/* Pass 1: walk the top-level list and register every function. */
+static void registerFunctions(ASTNode* node) {
+    if (!node) return;
+    if (node->type == NODE_STMT_LIST) {
+        registerFunctions(node->data.stmtlist.stmt);
+        registerFunctions(node->data.stmtlist.next);
+    } else if (node->type == NODE_FUNC_DEF) {
+        registerFunction(node);
+    }
+}
+
+/* Pass 2: check every function body, and every global declaration in order. */
+static void checkFunctions(ASTNode* node) {
+    if (!node) return;
+    if (node->type == NODE_STMT_LIST) {
+        checkFunctions(node->data.stmtlist.stmt);
+        checkFunctions(node->data.stmtlist.next);
+    } else if (node->type == NODE_FUNC_DEF) {
+        checkFuncDef(node);
+    } else {
+        checkStmt(node);   /* global declaration */
+    }
+}
+
 int performSemanticAnalysis(ASTNode* root) {
     if (!root) {
         fprintf(stderr, "SEMANTIC ERROR: No AST to analyze\n");
@@ -387,15 +626,15 @@ int performSemanticAnalysis(ASTNode* root) {
     trace("Entered global scope\n");
     printSemanticScopes();
 
-    /* The starter language has no functions, so one walk over the statement
-     * list is the whole analysis.  Topic 3 replaces this with two passes. */
-    checkStmtList(root);
+    /* The single walk over the statement list was replaced by the two passes below. */
 /* --------------------------------------------------------------
  * TODO (Topic 3)
  * Replace the single walk with TWO passes:
  *   pass 1: registerFunctions(root) — record every signature
  *   pass 2: checkFunctions(root)    — check every body
  * -------------------------------------------------------------- */
+    registerFunctions(root);
+    checkFunctions(root);
 
     /* Exit global scope */
     exitScope();

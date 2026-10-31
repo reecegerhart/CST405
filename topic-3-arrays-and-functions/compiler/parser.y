@@ -72,6 +72,7 @@ ASTNode* root = NULL;
  * TODO (Topic 3)
  * Functions need one more keyword token: RETURN.
  * -------------------------------------------------------------- */
+%token RETURN
 
 /* NON-TERMINAL TYPES */
 %type <node> program stmt_list stmt decl assign expr print_stmt
@@ -82,6 +83,8 @@ ASTNode* root = NULL;
  *   decl_or_func_list decl_or_func func_def params param_list param
  *   return_stmt block func_call arg_list args
  * -------------------------------------------------------------- */
+%type <node> decl_or_func_list decl_or_func func_def params param_list param
+%type <node> return_stmt block func_call arg_list args
 
 /* OPERATOR PRECEDENCE AND ASSOCIATIVITY
  * Listed from lowest to highest precedence.
@@ -102,13 +105,14 @@ ASTNode* root = NULL;
  * TODO (Topic 3)
  * Implement this part of the milestone.
  * -------------------------------------------------------------- */
+%right UMINUS
 
 %%
 
 /* PROGRAM RULE — in the starter language a program IS a list of statements.
  * Topic 3 replaces this rule the moment functions arrive. */
 program:
-    stmt_list { root = $1; }
+    decl_or_func_list { root = $1; }
     ;
 /* --------------------------------------------------------------
  * TODO (Topic 3)
@@ -120,6 +124,19 @@ program:
  * Executable statements now live only inside a function body — which
  * is why `main` suddenly matters.
  * -------------------------------------------------------------- */
+decl_or_func_list:
+    decl_or_func {
+        $$ = $1;
+    }
+    | decl_or_func_list decl_or_func {
+        $$ = createStmtList($1, $2);
+    }
+    ;
+
+decl_or_func:
+    func_def { $$ = $1; }
+    | decl   { $$ = $1; }
+    ;
 
 /* --------------------------------------------------------------
  * TODO (Topic 3)
@@ -132,6 +149,49 @@ program:
  * An array parameter carries no size because arrays are passed by
  * REFERENCE: the callee receives an address, not a copy of the data.
  * -------------------------------------------------------------- */
+func_def:
+    INT ID '(' params ')' block {
+        $$ = createFuncDef($2, $4, $6);
+        free($2);
+    }
+    | INT ID '(' ')' block {
+        $$ = createFuncDef($2, NULL, $5);
+        free($2);
+    }
+    ;
+
+params:
+    param_list { $$ = $1; }
+    ;
+
+param_list:
+    param {
+        $$ = createParamList(NULL, $1);
+    }
+    | param_list ',' param {
+        $$ = createParamList($1, $3);
+    }
+    ;
+
+param:
+    INT ID {
+        $$ = createParam($2);
+        free($2);
+    }
+    | INT ID '[' ']' {
+        $$ = createArrayParam($2);
+        free($2);
+    }
+    ;
+
+block:
+    '{' stmt_list '}' {
+        $$ = createBlock($2);
+    }
+    | '{' '}' {
+        $$ = createBlock(NULL);
+    }
+    ;
 
 /* STATEMENT LIST */
 stmt_list:
@@ -154,6 +214,9 @@ stmt:
  * effect are all statements now.  Add three alternatives:
  *   | return_stmt      | block      | func_call ';'
  * -------------------------------------------------------------- */
+    | return_stmt
+    | block
+    | func_call ';' { $$ = $1; }
 /* --------------------------------------------------------------
  * TODO (Topic 3)
  * Implement this part of the milestone.
@@ -173,6 +236,10 @@ decl:
  * The size is a NUM, not an expression — the compiler must know how many
  * bytes to reserve, and it must know that at compile time.
  * -------------------------------------------------------------- */
+    | INT ID '[' NUM ']' ';' {
+        $$ = createArrayDecl($2, $4);
+        free($2);
+    }
     ;
 
 /* ASSIGNMENT - x = expr; or arr[i] = expr; */
@@ -187,12 +254,25 @@ assign:
  * The left-hand side is now a tree, not just a name, so the assignment node
  * stores it in arrayLHS and leaves `var` NULL.
  * -------------------------------------------------------------- */
+    | ID '[' expr ']' '=' expr ';' {
+        $$ = createAssign(NULL, $6);
+        $$->data.assign.arrayLHS = createArrayIndex($1, $3);
+        free($1);
+    }
     ;
 
 /* --------------------------------------------------------------
  * TODO (Topic 3)
  * RETURN, in both forms:  return expr;  and  return;
  * -------------------------------------------------------------- */
+return_stmt:
+    RETURN expr ';' {
+        $$ = createReturn($2);
+    }
+    | RETURN ';' {
+        $$ = createReturn(NULL);
+    }
+    ;
 
 
 /* EXPRESSION RULES */
@@ -209,6 +289,13 @@ expr:
  * Two new kinds of primary expression: an array element  arr[i]  and a
  * function call used for its value.
  * -------------------------------------------------------------- */
+    | ID '[' expr ']' {
+        $$ = createArrayIndex($1, $3);
+        free($1);
+    }
+    | func_call {
+        $$ = $1;
+    }
     | expr '+' expr {
         $$ = createBinOp('+', $1, $3);
     }
@@ -219,18 +306,33 @@ expr:
  * term/factor layers to get precedence is the classic wrong turn here;
  * it works, but it is the answer to a question bison already answered.
  * -------------------------------------------------------------- */
+    | expr '-' expr {
+        $$ = createBinOp('-', $1, $3);
+    }
+    | expr '*' expr {
+        $$ = createBinOp('*', $1, $3);
+    }
+    | expr '/' expr {
+        $$ = createBinOp('/', $1, $3);
+    }
 /* --------------------------------------------------------------
  * TODO (Topic 3)
  * Unary minus.  %prec UMINUS is what stops  -2 * 3  parsing as  -(2 * 3):
  * without it the rule inherits the precedence of BINARY '-', which is
  * lower than '*'.
  * -------------------------------------------------------------- */
+    | '-' expr %prec UMINUS {
+        $$ = createBinOp('u', $2, NULL);
+    }
 /* --------------------------------------------------------------
  * TODO (Topic 3)
  * Parentheses.  Note there is no node for them: ( e ) just yields e.
  * Parentheses exist to steer the PARSER; once the tree is built the
  * grouping they asked for is recorded in its shape and they vanish.
  * -------------------------------------------------------------- */
+    | '(' expr ')' {
+        $$ = $2;
+    }
     ;
 
 /* --------------------------------------------------------------
@@ -242,6 +344,31 @@ expr:
  * Build the list with createArgList so tac.c can walk it in source
  * order — argument order is part of the calling convention.
  * -------------------------------------------------------------- */
+func_call:
+    ID '(' args ')' {
+        $$ = createFuncCall($1, $3);
+        free($1);
+    }
+    | ID '(' ')' {
+        $$ = createFuncCall($1, NULL);
+        free($1);
+    }
+    ;
+
+/* The empty case is the `ID '(' ')'` alternative above; making args
+ * nullable as well would give bison a shift/reduce conflict on ')'. */
+args:
+    arg_list { $$ = $1; }
+    ;
+
+arg_list:
+    expr {
+        $$ = createArgList(NULL, $1);
+    }
+    | arg_list ',' expr {
+        $$ = createArgList($1, $3);
+    }
+    ;
 
 /* PRINT STATEMENT */
 print_stmt:
