@@ -1,0 +1,7 @@
+/* Expected error: declares more than 4 parameters
+ * Rejected even though nothing calls it: the fifth parameter has no register
+ * to arrive in. */
+int five(int a, int b, int c, int d, int e) { return a; }
+int main() {
+    return 0;
+}

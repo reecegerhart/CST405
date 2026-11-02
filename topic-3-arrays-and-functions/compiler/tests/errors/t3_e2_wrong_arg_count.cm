@@ -1,0 +1,6 @@
+/* Expected error: Function 'f' expects 2 argument(s) but the call supplies 1 */
+int f(int a, int b) { return a + b; }
+int main() {
+    print(f(1));
+    return 0;
+}

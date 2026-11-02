@@ -2,7 +2,7 @@
 
 Topic 3: Compiling Complex Variables and Functions
 
-The work is split by pipeline stage. Reece owns the front end (scanner, parser, AST, semantic analysis). Stili owns the back end (three address code and MIPS generation). The AST is the handoff between the two halves.
+The work is split by pipeline stage. Reece owns the front end (scanner, parser, AST, semantic analysis). Stylianos owns the back end (three address code and MIPS generation). The AST is the handoff between the two halves.
 
 ---
 
@@ -68,7 +68,7 @@ Free identifier strings returned by the scanner after passing them to AST constr
 * Add the missing `arrayLHS` field to the assignment structure. The parser and `tac.c` both refer to it, but it is not currently defined.
 * Declare all new constructors: the function constructors, `createBlock`, `createArrayDecl`, `createArrayParam`, and `createArrayIndex`.
 
-**Agree on all node and field names with Stili before she starts `tac.c`.** Her half cannot compile without them.
+**Agree on all node and field names with Stylianos before `tac.c` is started.** The back end cannot compile without them.
 
 ### `ast.c`
 
@@ -121,7 +121,7 @@ When an error occurs, report the line number using `node->lineno`, identify the 
 
 ---
 
-## Stili
+## Stylianos Regas
 
 ### `tac.c`
 
@@ -175,6 +175,6 @@ Use `operandReg` when reading values and `defReg` when writing values. Using the
 
 ## Shared
 
-* **Interface agreement:** Agree on node kinds and union field names (for example `NODE_FUNC_CALL`, `data.func_call.args`, `array_index.name` and `.index`) before either person starts. Reece owns `ast.h`, and Stili reads from it.
-* **Testing:** Stili cannot run the `t3_*.cm` programs until Reece's front end works. Until then, Stili can hand-build small AST trees to test `tac.c` and `codegen.c`.
+* **Interface agreement:** Agree on node kinds and union field names (for example `NODE_FUNC_CALL`, `data.func_call.args`, `array_index.name` and `.index`) before either person starts. Reece owns `ast.h`, and Stylianos reads from it.
+* **Testing:** Stylianos cannot run the `t3_*.cm` programs until Reece's front end works. Until then, Stylianos can hand-build small AST trees to test `tac.c` and `codegen.c`.
 * **Write-up notes:** Mention that array names are not expression nodes (which is what stops this language having pointers) and that there is no array bounds checking at compile time or run time.

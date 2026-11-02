@@ -1,0 +1,15 @@
+/* Expected output: 51  2
+ * Only t0, t1, ... are compiler temporaries.  `total` and `t1x` start the same
+ * way but are ordinary variables, and must be treated as ordinary variables. */
+int t1x;
+int setit() { t1x = 2; return 0; }
+int mix(int a, int b, int total, int d) {
+    return (a * b) + ((total * d) + (a * d));
+}
+int main() {
+    print(mix(2, 3, 7, 5));   /* 6 + (35 + 10) = 51 */
+    t1x = 1;
+    setit();
+    print(t1x);               /* 2: the call changed the global */
+    return 0;
+}

@@ -1,0 +1,17 @@
+/* Expected output: 5  10  18
+ * Topic 2's t2_01_basics, wrapped in main() because statements now live only
+ * inside a function body.  Declare, assign, add, print. */
+int main() {
+    int x;
+    int y;
+    int total;
+
+    x = 5;
+    y = 10;
+    total = x + y + 3;
+
+    print(x);
+    print(y);
+    print(total);
+    return 0;
+}

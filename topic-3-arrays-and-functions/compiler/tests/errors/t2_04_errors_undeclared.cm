@@ -1,0 +1,9 @@
+/* Expected error: Variable 'ghost' is used before being declared
+ * Topic 2's t2_04, wrapped in main().  It parses cleanly but `ghost` was never
+ * declared, which only the semantic analyzer can catch. */
+int main() {
+    int x;
+    x = 1;
+    print(ghost);
+    return 0;
+}

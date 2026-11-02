@@ -1,0 +1,21 @@
+/* Expected output: 102  203  90  13
+ * Twelve live variables do not fit in $t0-$t9, so values must spill and reload
+ * without an instruction ever evicting one of its own operands. */
+int pressure(int p) {
+    int a; int b; int c; int d; int e; int f;
+    int g; int h; int i; int j; int k; int l;
+    int v[3];
+    a = p + 1;  b = p + 2;  c = p + 3;  d = p + 4;
+    e = p + 5;  f = p + 6;  g = p + 7;  h = p + 8;
+    i = p + 9;  j = p + 10; k = p + 11; l = p + 12;
+    print(100 + a);                                       /* 102 */
+    print(200 + b);                                       /* 203 */
+    print(a + b + c + d + e + f + g + h + i + j + k + l); /* 90  */
+    v[p] = l;
+    print(v[1]);                                          /* 13  */
+    return 0;
+}
+int main() {
+    pressure(1);
+    return 0;
+}
