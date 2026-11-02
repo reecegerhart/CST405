@@ -1,0 +1,11 @@
+/* Expected output: 42
+ * Topic 2's t2_03_comments, wrapped in main().  Comments are the scanner's
+ * business and nothing else's. */
+int main() {
+    int answer;   // a line comment
+    /* a block
+       comment spanning lines */
+    answer = 40 + 2;
+    print(answer);   /* trailing block comment */
+    return 0;
+}

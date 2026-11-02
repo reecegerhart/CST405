@@ -49,7 +49,20 @@ RegisterAllocator regAlloc;       /* The $t0-$t9 cache                      */
 /* --------------------------------------------------------------
  * TODO (Topic 3)
  * Implement this part of the milestone.
+ *
+ * ARG instructions are buffered here and only moved into $a0-$a3 by their
+ * CALL, because a nested call between them needs $a0-$a3 for itself:
+ *     ARG 1 ; ARG 2 ; t0 = CALL g, 1 ; ARG t0 ; t1 = CALL f, 2
  * -------------------------------------------------------------- */
+#define MAX_PENDING_ARGS 64
+
+static const char* pendingArgs[MAX_PENDING_ARGS];
+static int pendingArgCount = 0;
+static int paramIndex = 0;        /* Next incoming $a register for TAC_PARAM */
+
+/* Registers touched after this timestamp belong to the instruction being
+ * generated, so they must not be evicted while it is still using them. */
+static int pinFloor = 0;
 
 static int frameSize  = 0;        /* Size of the frame being generated       */
 static const char* currentFunc = NULL;
@@ -159,11 +172,12 @@ static int findVarReg(const char* name) {
  * to lose.  A real compiler would use liveness information here; LRU is a
  * good approximation and is easy to reason about in class. */
 static int selectVictimReg(void) {
-    int victim = 0, oldest = regAlloc.regs[0].lastUsed;
-    for (int i = 1; i < NUM_TEMP_REGS; i++) {
+    int victim = -1, oldest = 0;
+    for (int i = 0; i < NUM_TEMP_REGS; i++) {
+        if (regAlloc.regs[i].lastUsed > pinFloor) continue;
         /* Values with no memory home are the cheapest to discard */
         if (!regAlloc.regs[i].hasHome && regAlloc.regs[i].inUse) return i;
-        if (regAlloc.regs[i].lastUsed < oldest) {
+        if (victim == -1 || regAlloc.regs[i].lastUsed < oldest) {
             oldest = regAlloc.regs[i].lastUsed;
             victim = i;
         }
@@ -223,6 +237,15 @@ static int defReg(const char* name) {
  * TODO (Topic 3)
  * Implement this part of the milestone.
  * -------------------------------------------------------------- */
+/* An anonymous register for address arithmetic.  It has no memory home; give
+ * it back with releaseReg as soon as the address has been used. */
+static int scratchReg(void) {
+    static int serial = 0;
+    char n[MAX_VAR_NAME];
+    snprintf(n, sizeof n, "#s%d", serial++);
+    return getReg(n, 0, 0);
+}
+
 static void releaseReg(int r) {
     if (r < 0) return;
     regAlloc.regs[r].inUse      = 0;
@@ -305,6 +328,49 @@ static void emitStoreHome(int reg, const char* name) {
  *                                              ELSE'S base address
  * Then element address = base + index*4  (sll by 2, then add).
  * -------------------------------------------------------------- */
+static int elementAddrReg(const char* name, const char* index) {
+    Symbol* s = lookupSymbol(name);
+    if (!s || !s->isArray) {
+        fprintf(stderr, "codegen: '%s' is indexed but is not an array "
+                        "(in function '%s')\n",
+                name, currentFunc ? currentFunc : "?");
+        exit(1);
+    }
+
+    int idx  = operandReg(index);
+    int addr = scratchReg();
+
+    if (s->isGlobal) {
+        fprintf(out, "    la   $t%d, %s\n", addr, dataLabel(s->name));
+    } else if (s->isParamArray) {
+        fprintf(out, "    lw   $t%d, %d($sp)        # %s (base address)\n", addr, s->offset, s->name);
+    } else {
+        fprintf(out, "    addi $t%d, $sp, %d        # %s\n", addr, s->offset, s->name);
+    }
+
+    int scaled = scratchReg();
+    fprintf(out, "    sll  $t%d, $t%d, 2\n", scaled, idx);
+    fprintf(out, "    add  $t%d, $t%d, $t%d       # &%s[%s]\n", addr, addr, scaled, name, index);
+    releaseReg(scaled);
+
+    return addr;
+}
+
+/* Move one buffered argument into $aN.  An array is passed as its base
+ * ADDRESS; an array parameter's slot already holds one, so it moves like a
+ * scalar. */
+static void emitArgMove(int n, const char* arg) {
+    Symbol* s = isConstant(arg) ? NULL : lookupSymbol(arg);
+
+    if (s && s->isArray && s->isGlobal) {
+        fprintf(out, "    la   $a%d, %s\n", n, dataLabel(s->name));
+    } else if (s && s->isArray && !s->isParamArray) {
+        fprintf(out, "    addi $a%d, $sp, %d        # %s\n", n, s->offset, s->name);
+    } else {
+        fprintf(out, "    move $a%d, $t%d            # arg %s\n", n, operandReg(arg), arg);
+    }
+}
+
 /* ==========================================================================
  * PART 3 — FRAME LAYOUT
  * --------------------------------------------------------------------------
@@ -447,10 +513,14 @@ void generateMIPSFromTAC(const char* filename) {
         trace("\n  Activation record for '%s': %d bytes\n", currentFunc, frameSize);
         printSymTab();
         initRegAlloc();
+        pendingArgCount = 0;
+        paramIndex = 0;
 
         emitPrologue(currentFunc, frameSize);
 
         for (TACInstr* i = c->next; i && i->op != TAC_FUNC_END; i = i->next) {
+            pinFloor = regAlloc.timestamp;
+
             switch (i->op) {
 
             /* ---------- storage declarations: no code, just a comment ----- */
@@ -473,6 +543,19 @@ void generateMIPSFromTAC(const char* filename) {
  * into its frame slot, because $a0-$a3 will be needed again the moment
  * this function calls something else.
  * -------------------------------------------------------------- */
+            case TAC_PARAM: {
+                if (paramIndex >= MAX_ARGS) {
+                    fprintf(stderr, "codegen: function '%s' declares more than %d parameters "
+                                    "(only $a0-$a%d are available)\n",
+                            currentFunc, MAX_ARGS, MAX_ARGS - 1);
+                    exit(1);
+                }
+                Symbol* s = lookupSymbol(i->result);
+                fprintf(out, "    sw   $a%d, %d($sp)        # param %s\n",
+                        paramIndex++, s->offset, i->result);
+                break;
+            }
+
             /* ---------- arithmetic, comparison ---------------------------- */
             case TAC_ADD: case TAC_SUB: case TAC_MUL: case TAC_DIV:
             {
@@ -531,6 +614,45 @@ void generateMIPSFromTAC(const char* filename) {
  *
  * An array passed as an argument is passed as its base ADDRESS.
  * -------------------------------------------------------------- */
+            case TAC_ARG:
+                if (pendingArgCount >= MAX_PENDING_ARGS) {
+                    fprintf(stderr, "codegen: calls nested too deeply in function '%s'\n", currentFunc);
+                    exit(1);
+                }
+                pendingArgs[pendingArgCount++] = i->arg1;
+                break;
+
+            case TAC_CALL: {
+                int count = atoi(i->arg2);
+                if (count > MAX_ARGS) {
+                    fprintf(stderr, "codegen: call to '%s' in function '%s' passes %d arguments "
+                                    "(at most %d are supported)\n",
+                            i->arg1, currentFunc, count, MAX_ARGS);
+                    exit(1);
+                }
+
+                int first = pendingArgCount - count;
+                for (int n = 0; n < count; n++) emitArgMove(n, pendingArgs[first + n]);
+                pendingArgCount = first;
+
+                flushRegisters("caller-saved across call");
+                fprintf(out, "    jal  %s\n", funcLabel(i->arg1));
+
+                int d = defReg(i->result);
+                fprintf(out, "    move $t%d, $v0            # %s = return value\n", d, i->result);
+                break;
+            }
+
+            case TAC_RETURN:
+                if (i->arg1) {
+                    fprintf(out, "    move $v0, $t%d            # return %s\n", operandReg(i->arg1), i->arg1);
+                }
+                /* The jump skips the end-of-body flush, and a global still
+                 * dirty in a register would be lost with the frame. */
+                flushRegisters("before return");
+                fprintf(out, "    j    %s__epilogue\n", funcLabel(currentFunc));
+                break;
+
 /* --------------------------------------------------------------
  * TODO (Topic 3)
  * ARRAY_LOAD and ARRAY_STORE.  Compute the element address once with
@@ -538,6 +660,24 @@ void generateMIPSFromTAC(const char* filename) {
  * value being stored in the `result` field — read the TAC listing rather
  * than guessing which field is which.
  * -------------------------------------------------------------- */
+            case TAC_ARRAY_LOAD: {
+                int addr = elementAddrReg(i->arg1, i->arg2);
+                int d = defReg(i->result);
+                fprintf(out, "    lw   $t%d, 0($t%d)         # %s = %s[%s]\n",
+                        d, addr, i->result, i->arg1, i->arg2);
+                releaseReg(addr);
+                break;
+            }
+
+            case TAC_ARRAY_STORE: {
+                int value = operandReg(i->result);
+                int addr = elementAddrReg(i->arg1, i->arg2);
+                fprintf(out, "    sw   $t%d, 0($t%d)         # %s[%s] = %s\n",
+                        value, addr, i->arg1, i->arg2, i->result);
+                releaseReg(addr);
+                break;
+            }
+
             default:
                 break;
             }

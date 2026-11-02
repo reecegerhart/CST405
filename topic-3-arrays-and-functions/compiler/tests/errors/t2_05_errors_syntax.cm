@@ -1,0 +1,11 @@
+/* Expected error: Syntax Error at line 8
+ * Topic 2's t2_05, wrapped in main().  The semicolon is missing on line 7, but
+ * the parser cannot know until it reads the next token on line 8. */
+int main() {
+    int x;
+    int y;
+    x = 5
+    y = 6;
+    print(y);
+    return 0;
+}

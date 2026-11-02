@@ -1,0 +1,49 @@
+/* Expected output: 2  20  3  2  1  10  4  8  7  5  6
+ * A block's declaration hides an outer name without replacing it, even though
+ * a function's frame is one flat table of names. */
+int n;
+int a[2];
+int readn() { return n; }
+int early() {
+    n = 7;           /* the global: the local below is not declared yet */
+    int n;
+    n = 8;
+    print(n);        /* 8 */
+    print(readn());  /* 7 */
+    return 0;
+}
+int main() {
+    int x;
+    x = 1;
+    n = 10;
+    {
+        int x;
+        int n;
+        x = 2;
+        n = 20;
+        print(x);    /* 2  */
+        print(n);    /* 20 */
+        {
+            int x;
+            x = 3;
+            print(x);  /* 3 */
+        }
+        print(x);    /* 2  */
+    }
+    print(x);        /* 1  */
+    print(n);        /* 10 */
+    {
+        int x;
+        x = 4;
+        print(x);    /* 4  */
+    }
+    early();         /* 8 7 */
+    a[0] = 6;
+    {
+        int a[2];
+        a[0] = 5;
+        print(a[0]); /* 5  */
+    }
+    print(a[0]);     /* 6  */
+    return 0;
+}

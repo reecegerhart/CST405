@@ -1,0 +1,5 @@
+/* Expected error: Array 'a' is declared with size 0 */
+int a[0];
+int main() {
+    return 0;
+}

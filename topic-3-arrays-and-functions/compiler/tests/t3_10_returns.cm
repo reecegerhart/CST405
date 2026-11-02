@@ -1,0 +1,16 @@
+/* Expected output: 6  5  8  40
+ * `return` must leave the function at once, and a global still sitting in a
+ * register must reach memory before the frame goes away. */
+int g;
+int setg(int v) { g = v; return v + 1; }
+int early(int v) { return v * 2; print(999); return 0; }
+int bare() { g = 40; return; }
+int main() {
+    print(setg(5));    /* 6  */
+    print(g);          /* 5  */
+    print(early(4));   /* 8, and never 999 */
+    bare();
+    print(g);          /* 40 */
+    return 0;
+    print(111);        /* never runs */
+}

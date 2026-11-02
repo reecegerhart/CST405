@@ -1,0 +1,12 @@
+/* Expected output: 6  21
+ * Topic 2's t2_02_chained, wrapped in main().  Addition is LEFT associative,
+ * so a + b + c parses as (a + b) + c. */
+int main() {
+    int a; int b; int c; int r;
+    a = 1; b = 2; c = 3;
+    r = a + b + c;
+    print(r);
+    r = r + r + r + 3;
+    print(r);
+    return 0;
+}

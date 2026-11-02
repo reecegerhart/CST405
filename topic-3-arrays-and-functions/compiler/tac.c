@@ -74,8 +74,16 @@ char* allocTemp() {
     return temp;
 }
 
+/* Is this exactly a compiler temporary (t0, t1, ...)?  A first-letter test is
+ * not enough: `total` and `t1x` are ordinary user variables. */
+static int isTempName(const char* s) {
+    if (!s || s[0] != 't' || !s[1]) return 0;
+    for (int i = 1; s[i]; i++) if (s[i] < '0' || s[i] > '9') return 0;
+    return 1;
+}
+
 void freeTemp(char* temp) {
-    if (!temp || temp[0] != 't') return;
+    if (!isTempName(temp)) return;
 
     int tempNum = atoi(temp + 1);
     if (!tempAlloc.allocated[tempNum]) return;
@@ -132,8 +140,70 @@ void appendOptimizedTAC(TACInstr* instr) {
  * nested NODE_BREAK can emit GOTO to the right exit point.
  */
 
+/* ── SOURCE SCOPES ──────────────────────────────────────────────────────────
+ * Semantic analysis allows  int x; { int x; }  but a function's frame is one
+ * flat table of names (see layoutFrame in codegen.c), so two variables that
+ * are alive together must reach the back end under two different names.  A
+ * local declared while its name is already visible becomes x.1, x.2, ...
+ * The dot cannot appear in a source identifier, so the new name cannot
+ * collide with anything, and locals never become assembler labels.
+ */
+#define MAX_VISIBLE_NAMES 1024
+
+typedef struct {
+    char* source;    /* The name the programmer wrote  */
+    char* tacName;   /* The name the back end will see */
+    int   depth;     /* 0 = global, 1 = function, 2+ = nested block */
+} VisibleName;
+
+static VisibleName visibleNames[MAX_VISIBLE_NAMES];
+static int visibleCount = 0;
+static int blockDepth = 0;
+static int shadowSerial = 0;
+
+static void bindName(char* source, char* tacName) {
+    if (visibleCount >= MAX_VISIBLE_NAMES) {
+        fprintf(stderr, "ERROR: Exceeded maximum visible names\n");
+        exit(1);
+    }
+    visibleNames[visibleCount].source  = source;
+    visibleNames[visibleCount].tacName = tacName;
+    visibleNames[visibleCount].depth   = blockDepth;
+    visibleCount++;
+}
+
+/* The TAC name a source name refers to right now (innermost scope first). */
+static char* tacNameOf(char* source) {
+    for (int i = visibleCount - 1; i >= 0; i--) {
+        if (strcmp(visibleNames[i].source, source) == 0) return visibleNames[i].tacName;
+    }
+    return source;
+}
+
+/* Bring a declared variable into scope and return its TAC name. */
+static char* declareName(char* source) {
+    char* name = source;
+    for (int i = 0; i < visibleCount; i++) {
+        if (strcmp(visibleNames[i].source, source) == 0) {
+            name = malloc(strlen(source) + 16);
+            sprintf(name, "%s.%d", source, ++shadowSerial);
+            break;
+        }
+    }
+    bindName(source, name);
+    return name;
+}
+
+static void closeScope(void) {
+    while (visibleCount > 0 && visibleNames[visibleCount - 1].depth == blockDepth) {
+        visibleCount--;
+    }
+    blockDepth--;
+}
+
 /* Forward declarations */
 static void generateTACStmt(ASTNode* node);
+static void generateTACStmtList(ASTNode* node);
 
 /* --------------------------------------------------------------
  * TODO (Topic 3)
@@ -142,7 +212,23 @@ static void generateTACStmt(ASTNode* node);
  * The count goes into the CALL instruction so the back end knows how
  * many of the buffered ARGs belong to this call — which is what makes
  * nested calls like f(1, g(2)) come out right.
+ *
+ * ARGs are only buffered until the CALL, so the temporaries they name must
+ * stay allocated until then.  They are handed back through `held` for the
+ * caller to free; freeing them here would let the next argument's nested
+ * call reuse a temporary that an earlier ARG still needs.
  * -------------------------------------------------------------- */
+static int generateArgTAC(ASTNode* args, char*** held) {
+    int count = 0;
+    *held = NULL;
+    for (ASTNode* a = args; a; a = a->data.arg_list.next) {
+        char* value = generateTACExpr(a->data.arg_list.expr);
+        appendTAC(createTAC(TAC_ARG, value, NULL, NULL));
+        *held = realloc(*held, (count + 1) * sizeof(char*));
+        (*held)[count++] = value;
+    }
+    return count;
+}
 
 /* Generate TAC for expression - returns the temp/var holding result */
 char* generateTACExpr(ASTNode* node) {
@@ -156,7 +242,7 @@ char* generateTACExpr(ASTNode* node) {
         }
 
         case NODE_VAR:
-            return strdup(node->data.name);
+            return strdup(tacNameOf(node->data.name));
 
         case NODE_BINOP: {
             char* left = generateTACExpr(node->data.binop.left);
@@ -199,6 +285,33 @@ char* generateTACExpr(ASTNode* node) {
  * Both return the NAME of the temporary holding the result, because
  * that is the contract generateTACExpr has with its callers.
  * -------------------------------------------------------------- */
+        case NODE_FUNC_CALL: {
+            char** held;
+            int count = generateArgTAC(node->data.func_call.args, &held);
+
+            char countText[20];
+            sprintf(countText, "%d", count);
+
+            char* temp = allocTemp();
+            appendTAC(createTAC(TAC_CALL, node->data.func_call.name, countText, temp));
+
+            for (int i = 0; i < count; i++) freeTemp(held[i]);
+            free(held);
+
+            return temp;
+        }
+
+        case NODE_ARRAY_INDEX: {
+            char* index = generateTACExpr(node->data.array_index.index);
+            char* temp = allocTemp();
+
+            appendTAC(createTAC(TAC_ARRAY_LOAD, tacNameOf(node->data.array_index.name), index, temp));
+
+            freeTemp(index);
+
+            return temp;
+        }
+
         default:
             return NULL;
     }
@@ -222,18 +335,28 @@ static void generateTACStmt(ASTNode* node) {
 
     switch(node->type) {
         case NODE_DECL:
-            appendTAC(createTAC(TAC_DECL, node->data.decl.varType, NULL, node->data.decl.name));
+            appendTAC(createTAC(TAC_DECL, node->data.decl.varType, NULL, declareName(node->data.decl.name)));
             break;
 
         case NODE_ASSIGN: {
             char* expr = generateTACExpr(node->data.assign.value);
 
-            appendTAC(createTAC(TAC_ASSIGN, expr, NULL, node->data.assign.var));
 /* --------------------------------------------------------------
  * TODO (Topic 3)
  * Assignment now has two shapes.  If arrayLHS is set, evaluate the
  * index and emit ARRAY_STORE; otherwise emit a plain ASSIGN.
  * -------------------------------------------------------------- */
+            if (node->data.assign.arrayLHS) {
+                ASTNode* target = node->data.assign.arrayLHS;
+                char* index = generateTACExpr(target->data.array_index.index);
+
+                /* ARRAY_STORE keeps the value being stored in `result` */
+                appendTAC(createTAC(TAC_ARRAY_STORE, tacNameOf(target->data.array_index.name), index, expr));
+
+                freeTemp(index);
+            } else {
+                appendTAC(createTAC(TAC_ASSIGN, expr, NULL, tacNameOf(node->data.assign.var)));
+            }
             freeTemp(expr);
             break;
         }
@@ -251,12 +374,28 @@ static void generateTACStmt(ASTNode* node) {
  * emit RETURN.  Emitting RETURN is easy; making it actually leave the
  * function is codegen.c's job, and it is the part people forget.
  * -------------------------------------------------------------- */
+        case NODE_RETURN: {
+            char* value = generateTACExpr(node->data.ret.expr);
+            appendTAC(createTAC(TAC_RETURN, value, NULL, NULL));
+            freeTemp(value);
+            break;
+        }
+
 /* --------------------------------------------------------------
  * TODO (Topic 3)
- * NODE_BLOCK just recurses into its statement list — the scope it
- * opened mattered to semantic analysis and is finished with by now.
+ * NODE_BLOCK recurses into its statement list inside a scope of its own, so
+ * a declaration in the block can hide a name without replacing it.
  * NODE_FUNC_CALL as a statement evaluates and discards the result.
  * -------------------------------------------------------------- */
+        case NODE_BLOCK:
+            blockDepth++;
+            generateTACStmtList(node->data.block.stmt_list);
+            closeScope();
+            break;
+
+        case NODE_FUNC_CALL:
+            freeTemp(generateTACExpr(node));
+            break;
 
         case NODE_STMT_LIST:
             /* Left recursion in the grammar means a statement list may
@@ -270,6 +409,17 @@ static void generateTACStmt(ASTNode* node) {
  * size*4 bytes) but PARAM for an array parameter (which receives an
  * address).  One node type, two very different meanings.
  * -------------------------------------------------------------- */
+        case NODE_ARRAY_DECL:
+            if (node->data.array_decl.isParam) {
+                bindName(node->data.array_decl.name, node->data.array_decl.name);
+                appendTAC(createTAC(TAC_PARAM, "int[]", NULL, node->data.array_decl.name));
+            } else {
+                char size[20];
+                sprintf(size, "%d", node->data.array_decl.size);
+                appendTAC(createTAC(TAC_ARRAY_DECL, size, NULL, declareName(node->data.array_decl.name)));
+            }
+            break;
+
         default:
             break;
     }
@@ -283,23 +433,53 @@ static void generateTACStmt(ASTNode* node) {
  * Mark an array parameter with the type "int[]" so the code generator
  * knows the slot holds an address rather than the data.
  * -------------------------------------------------------------- */
+static void generateParamTAC(ASTNode* params) {
+    for (ASTNode* p = params; p; p = p->data.param_list.next) {
+        ASTNode* param = p->data.param_list.param;
+        if (param->type == NODE_ARRAY_DECL) {
+            generateTACStmt(param);
+        } else {
+            bindName(param->data.param.name, param->data.param.name);
+            appendTAC(createTAC(TAC_PARAM, "int", NULL, param->data.param.name));
+        }
+    }
+}
+
+static void generateTACFuncDef(ASTNode* node) {
+    appendTAC(createTAC(TAC_FUNC_BEGIN, NULL, NULL, node->data.func_def.name));
+
+    /* Parameters and body share ONE scope, matching checkFuncDef in semantic.c */
+    blockDepth++;
+    generateParamTAC(node->data.func_def.params);
+    generateTACStmtList(node->data.func_def.body->data.block.stmt_list);
+    closeScope();
+
+    appendTAC(createTAC(TAC_FUNC_END, NULL, NULL, node->data.func_def.name));
+}
+
+/* Walk the top-level list of declarations and function definitions. */
+static void generateTACList(ASTNode* node) {
+    if (!node) return;
+
+    if (node->type == NODE_STMT_LIST) {
+        generateTACList(node->data.stmtlist.stmt);
+        generateTACList(node->data.stmtlist.next);
+    } else if (node->type == NODE_FUNC_DEF) {
+        generateTACFuncDef(node);
+    } else {
+        generateTACStmt(node);   /* global declaration */
+    }
+}
+
 void generateTAC(ASTNode* node) {
     if (!node) return;
-    /* The starter language has no function syntax, but the code generator
-     * still emits code into MIPS functions — every program needs an entry
-     * point called `main`.  So the whole statement list becomes the body of
-     * an implicit main().  Topic 3 makes that function explicit in the
-     * source, and this wrapper goes away. */
-    appendTAC(createTAC(TAC_FUNC_BEGIN, NULL, NULL, "main"));
-    generateTACStmt(node);
-    appendTAC(createTAC(TAC_RETURN, "0", NULL, NULL));
-    appendTAC(createTAC(TAC_FUNC_END, NULL, NULL, "main"));
 /* --------------------------------------------------------------
  * TODO (Topic 3)
  * The program is now a list of declarations and function definitions,
  * so walk it with generateTACList instead of wrapping it in an
  * implicit main.  Every function gets its own FUNC_BEGIN/FUNC_END pair.
  * -------------------------------------------------------------- */
+    generateTACList(node);
 }
 
 /* Get operation name for printing */
@@ -487,9 +667,7 @@ static void dropFactsAbout(const char* name) {
  * compiler temporaries survive it. */
 static void dropNonTempFacts(void) {
     for (int i = 0; i < factCount; i++) {
-        const char* n = facts[i].name;
-        int temp = (n[0] == 't' && n[1] >= '0' && n[1] <= '9');
-        if (!temp) { facts[i] = facts[--factCount]; i--; }
+        if (!isTempName(facts[i].name)) { facts[i] = facts[--factCount]; i--; }
     }
 }
 
@@ -630,7 +808,10 @@ static TACList optimizePass(TACList* in) {
         if (isRead1 && a1 && !isConstantNumber(a1)) {
             const char* k = lookupFact(a1, 1);
             if (k) { a1 = (char*)k; optStats.constProp++; changesThisPass++; }
-            else {
+            else if (c->op != TAC_ARG) {
+                /* An ARG is not read until its CALL, by which time a nested
+                 * call in a later argument may have reused the copy's source.
+                 * A constant cannot change, but a copy can go stale. */
                 const char* cp = lookupFact(a1, 0);
                 if (cp) { a1 = (char*)cp; optStats.copyProp++; changesThisPass++; }
             }
@@ -707,7 +888,7 @@ static TACList optimizePass(TACList* in) {
          * observed by code this simple analysis cannot see. */
         if (emit->op == TAC_ASSIGN || (mnemonicIsPure(emit->op))) {
             const char* d = emit->result;
-            if (d && d[0] == 't' && d[1] >= '0' && d[1] <= '9' && !isReadLater(c->next, d)) {
+            if (isTempName(d) && !isReadLater(c->next, d)) {
                 optStats.deadCode++; changesThisPass++;
                 continue;
             }

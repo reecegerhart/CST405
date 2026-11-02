@@ -1,0 +1,9 @@
+/* Expected error: passes 5 arguments (at most 4 are supported)
+ * Semantic analysis accepts this because the counts match.  The limit belongs
+ * to the code generator, which has only $a0-$a3.  The callee is defined later
+ * so that the call is the first thing the back end rejects. */
+int main() {
+    print(five(1, 2, 3, 4, 5));
+    return 0;
+}
+int five(int a, int b, int c, int d, int e) { return a + b + c + d + e; }

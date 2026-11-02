@@ -105,7 +105,7 @@
 "//".*          { /* Skip single-line comments */ }
 "/*"([^*]|\*+[^*/])*\*+"/"  { /* Skip multi-line comments */ }
 
-[ \t\n]         { }
+[ \t\r\n]       { }
 
 .               { printf("Lexical Error: Unknown character '%c'\n", *yytext); }
 

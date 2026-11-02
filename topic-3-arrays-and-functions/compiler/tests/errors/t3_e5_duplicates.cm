@@ -1,0 +1,12 @@
+/* Expected error: Function 'f' is already defined
+ * Also reported in the same run: the duplicate variable, array and parameter. */
+int f() { return 1; }
+int f() { return 2; }
+int g(int p, int p) { return p; }
+int main() {
+    int a;
+    int a;
+    int b[2];
+    int b[2];
+    return 0;
+}

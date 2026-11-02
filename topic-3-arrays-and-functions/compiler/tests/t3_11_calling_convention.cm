@@ -1,0 +1,43 @@
+/* Expected output: 7  1234  2468  8  3  4  10  9  8  77  66  2  14  -28  75
+ * Argument order, four arguments, nested calls, parameters surviving a call
+ * and a print, and arrays passed by reference from every kind of storage. */
+int shared[3];
+int sub(int a, int b) { return a - b; }
+int four(int a, int b, int c, int d) { return a * 1000 + b * 100 + c * 10 + d; }
+int twice(int x) { return x * 2; }
+int keep(int a, int b) {
+    int c;
+    c = twice(a);
+    print(a);
+    print(b);
+    return c + b;
+}
+int fill(int v[], int i, int x) { v[i] = x; return x; }
+int first(int v[]) { return v[0]; }
+int forward(int v[]) { return first(v); }
+int main() {
+    int local[2];
+    int i;
+    print(sub(10, 3));                                     /* 7     */
+    print(four(1, 2, 3, 4));                               /* 1234  */
+    print(four(twice(1), twice(2), twice(3), twice(4)));   /* 2468  */
+    print(sub(twice(5), sub(3, 1)));                       /* 8     */
+    print(keep(3, 4));                                     /* 3 4 10 */
+    fill(shared, 2, 9);
+    print(shared[2]);                                      /* 9     */
+    fill(local, 1, 8);
+    print(local[1]);                                       /* 8     */
+    local[0] = 77;
+    print(forward(local));                                 /* 77    */
+    shared[0] = 66;
+    print(forward(shared));                                /* 66    */
+    i = twice(1) - 1;
+    local[i] = i + 1;
+    print(local[local[1] - 1]);                            /* 2     */
+    print(twice(3) + twice(4));                            /* 14    */
+    print(-twice(2) * (local[0] - 70));                    /* -28   */
+    print(sub(local[0] + 0, twice(1)));                    /* 75: the optimizer must not
+                                                              retarget the first ARG at a
+                                                              temporary the nested call reuses */
+    return 0;
+}

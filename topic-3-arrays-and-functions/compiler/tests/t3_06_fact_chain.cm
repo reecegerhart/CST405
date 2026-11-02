@@ -1,0 +1,14 @@
+/* Expected output: 120  30
+ * The language has no `if` yet, so a recursive fact() could never stop.  This
+ * chain exercises the same calling convention: every level must save $ra and
+ * keep its own n across the call. */
+int fact1(int n) { return n; }
+int fact2(int n) { return n * fact1(n - 1); }
+int fact3(int n) { return n * fact2(n - 1); }
+int fact4(int n) { return n * fact3(n - 1); }
+int fact5(int n) { return n * fact4(n - 1); }
+int main() {
+    print(fact5(5));              /* 120 */
+    print(fact4(4) + fact3(3));   /* 30  */
+    return 0;
+}
