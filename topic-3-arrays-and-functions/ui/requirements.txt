@@ -1,0 +1,7 @@
+# UI tier (Streamlit Community Cloud). No torch: thin client.
+streamlit==1.38.0
+requests==2.32.3
+pandas==2.2.2
+numpy==1.26.4
+matplotlib==3.9.2
+supabase==2.7.4

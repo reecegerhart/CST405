@@ -1,0 +1,6 @@
+# Default hyperparameters (same for BOTH models so the comparison is like-for-like).
+lr: 0.003
+batch_size: 64
+epochs: 12
+hidden_dim: 32
+seed: 0
