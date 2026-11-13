@@ -55,9 +55,13 @@
 "int"           { return INT; }
 "print"         { return PRINT; }
 "return"        { return RETURN; }
+    /* Loop keywords (Topic 4).  They sit ABOVE the identifier rule: flex
+     * picks the earlier rule when two match the same length, so "for"
+     * comes back as FOR and not as an ID. */
+"for"           { return FOR; }
     /* --------------------------------------------------------------
      * TODO (Topic 4)
-     * Return WHILE and FOR for the loop keywords.
+     * Return WHILE for the `while` keyword (FOR is done above).
      * -------------------------------------------------------------- */
     /* --------------------------------------------------------------
      * TODO (Topic 4)
@@ -75,22 +79,24 @@
 }
 
 
-    /* --------------------------------------------------------------
-     * TODO (Topic 4)
-     * Return LE, GE, EQ and NE for the two-character relational operators.
-     * These MUST exist as their own rules: without a `<=` rule, flex would
-     * match `<` and then `=` and your parser would see two tokens, not one.
-     * -------------------------------------------------------------- */
+    /* Two-character relational operators (Topic 4).  Each needs its own
+     * rule: flex always takes the LONGEST match, so with these rules "<="
+     * is one LE token rather than '<' followed by '='.  Without them the
+     * parser would see two tokens and report a syntax error. */
+"<="            { return LE; }
+">="            { return GE; }
+"=="            { return EQ; }
+"!="            { return NE; }
 
 "+"             { return '+'; }
 "-"             { return '-'; }
 "*"             { return '*'; }
 "/"             { return '/'; }
 
-    /* --------------------------------------------------------------
-     * TODO (Topic 4)
-     * Return the single-character relational operators.
-     * -------------------------------------------------------------- */
+    /* Single-character relational operators (Topic 4).  They come back as
+     * character literals, like the arithmetic operators above. */
+"<"             { return '<'; }
+">"             { return '>'; }
 
 "="             { return '='; }
 

@@ -68,26 +68,26 @@ ASTNode* root = NULL;
 %token <str> ID
 %token INT PRINT
 %token RETURN
+/* Loop keyword (Topic 4) */
+%token FOR
 /* --------------------------------------------------------------
  * TODO (Topic 4)
- * Declare the loop keywords: WHILE FOR BREAK.
+ * Declare the remaining loop keywords: WHILE BREAK.
  * -------------------------------------------------------------- */
-/* --------------------------------------------------------------
- * TODO (Topic 4)
- * Declare the two-character relational operator tokens: LE GE EQ NE.
- * (The single-character ones, < and >, arrive as character literals and
- *  need no %token declaration.)
- * -------------------------------------------------------------- */
+/* Two-character relational operators (Topic 4).  The single-character
+ * ones, < and >, arrive as character literals and need no %token. */
+%token LE GE EQ NE
 
 /* NON-TERMINAL TYPES */
 %type <node> program stmt_list stmt decl assign expr print_stmt
 %type <node> decl_or_func_list decl_or_func func_def params param_list param
 %type <node> return_stmt block func_call arg_list args
+/* For-loop non-terminals (Topic 4) */
+%type <node> for_stmt for_init for_cond for_update
 /* --------------------------------------------------------------
  * TODO (Topic 4)
  * Every new non-terminal needs its type declared here, or bison will
- * not know that $$ is an ASTNode*.  Add: while_stmt for_stmt
- * for_init for_cond for_update break_stmt
+ * not know that $$ is an ASTNode*.  Still to add: while_stmt break_stmt
  * -------------------------------------------------------------- */
 
 /* OPERATOR PRECEDENCE AND ASSOCIATIVITY
@@ -103,12 +103,13 @@ ASTNode* root = NULL;
  *   when bison sees ELSE it shifts (attaches it to the inner if)
  *   rather than reducing (closing the outer if first).
  */
-/* --------------------------------------------------------------
- * TODO (Topic 4)
- * Give the relational operators their precedence.  They bind LOOSER
- * than + - * /, which is what makes  a + 1 < b * 2  parse as
- *   (a + 1) < (b * 2)  and not  a + (1 < b) * 2.
- * -------------------------------------------------------------- */
+/* Relational operators (Topic 4) bind LOOSER than + - * /, which is
+ * what makes  a + 1 < b * 2  parse as  (a + 1) < (b * 2)  and not
+ * a + (1 < b) * 2.  As in C, equality (== !=) is one level looser
+ * still than ordering (< > <= >=), so  a < b == c < d  compares the
+ * two comparison results.  All are left associative. */
+%left EQ NE
+%left '<' '>' LE GE
 %left '+' '-'
 %left '*' '/'
 %right UMINUS              /* unary minus                            */
@@ -203,11 +204,11 @@ stmt:
     | assign
     | print_stmt
     | return_stmt
+    | for_stmt              /* Topic 4 */
 /* --------------------------------------------------------------
  * TODO (Topic 4)
- * A loop and a `break` are statements too.  Add them as alternatives:
+ * The other loop and `break` are statements too.  Add:
  *   | while_stmt
- *   | for_stmt
  *   | break_stmt
  * -------------------------------------------------------------- */
     | block
@@ -258,18 +259,53 @@ return_stmt:
     ;
 
 
+/* FOR LOOP (Topic 4)
+ *   for ( init ; cond ; update ) stmt
+ *
+ * All three parts of the header are OPTIONAL, so each has an empty
+ * alternative that yields NULL.  A NULL condition means "loop forever",
+ * as in C — the back end emits no test at all for it.
+ *
+ * init and update are assignments WITHOUT a semicolon: the two `;` in
+ * the header belong to the for-statement, not to the assignments, so
+ * the ordinary `assign` rule (which ends in ';') cannot be reused here.
+ * They still build ordinary NODE_ASSIGN nodes, so every later phase
+ * treats them exactly like any other assignment.
+ *
+ * The body is any `stmt`, so both  for (...) x = x + 1;  and a braced
+ * block work. */
+for_stmt:
+    FOR '(' for_init ';' for_cond ';' for_update ')' stmt {
+        $$ = createFor($3, $5, $7, $9);
+    }
+    ;
+
+for_init:
+    ID '=' expr {
+        $$ = createAssign($1, $3);
+        free($1);
+    }
+    | /* empty */ { $$ = NULL; }
+    ;
+
+for_cond:
+    expr          { $$ = $1; }
+    | /* empty */ { $$ = NULL; }
+    ;
+
+for_update:
+    ID '=' expr {
+        $$ = createAssign($1, $3);
+        free($1);
+    }
+    | /* empty */ { $$ = NULL; }
+    ;
+
 /* --------------------------------------------------------------
  * TODO (Topic 4)
- * WHILE and FOR.
+ * WHILE (FOR is done above).
  *
  *   while_stmt : WHILE '(' expr ')' stmt          -> createWhile(cond, body)
- *   for_stmt   : FOR '(' for_init ';' for_cond ';' for_update ')' stmt
- *                                                  -> createFor(init,cond,update,body)
- *
- * All three parts of a for-header are OPTIONAL, so for_init, for_cond
- * and for_update each need an empty alternative that yields NULL.
- * Note what for_init is NOT: it is an assignment WITHOUT a semicolon,
- * because the `;` belongs to the for-header, not to the assignment.
  * -------------------------------------------------------------- */
 
 /* EXPRESSION RULES */
@@ -300,14 +336,19 @@ expr:
     | expr '/' expr {
         $$ = createBinOp('/', $1, $3);
     }
-/* --------------------------------------------------------------
- * TODO (Topic 4)
- * The six relational operators, each producing a BINOP node.
- * createBinOp packs the operator into ONE char, so the two-character
- * operators get single-letter codes:  <= is 'l',  >= is 'g',
- * == is 'e',  != is 'n'.  (See opText() in ast.c for the full table.)
- * A comparison yields 1 or 0 — there is no separate boolean type.
- * -------------------------------------------------------------- */
+    /* The six relational operators (Topic 4), each producing a BINOP
+     * node.  createBinOp packs the operator into ONE char, so the
+     * two-character operators get single-letter codes:  <= is 'l',
+     * >= is 'g', == is 'e', != is 'n'  (see opText() in ast.c).
+     * A comparison yields 1 or 0 — there is no separate boolean type.
+     * Their precedence comes from the %left lines above, not from
+     * the shape of these rules. */
+    | expr '<' expr { $$ = createBinOp('<', $1, $3); }
+    | expr '>' expr { $$ = createBinOp('>', $1, $3); }
+    | expr LE  expr { $$ = createBinOp('l', $1, $3); }
+    | expr GE  expr { $$ = createBinOp('g', $1, $3); }
+    | expr EQ  expr { $$ = createBinOp('e', $1, $3); }
+    | expr NE  expr { $$ = createBinOp('n', $1, $3); }
     | '-' expr %prec UMINUS {
         $$ = createBinOp('u', $2, NULL);  /* 'u' for unary minus */
     }

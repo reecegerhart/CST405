@@ -159,11 +159,26 @@ ASTNode* createReturn(ASTNode* expr) {
     return node;
 }
 
+/* Create a for-loop node (Topic 4).
+ * Any of the four children may be NULL because every part of a for-header
+ * is optional; a NULL condition means the loop is infinite (see ast.h). */
+ASTNode* createFor(ASTNode* init, ASTNode* condition, ASTNode* update, ASTNode* body) {
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_FOR;
+    node->lineno = yylineno;
+    node->data.for_stmt.init = init;
+    node->data.for_stmt.condition = condition;
+    node->data.for_stmt.update = update;
+    node->data.for_stmt.body = body;
+    return node;
+}
+
 /* --------------------------------------------------------------
  * TODO (Topic 4)
- * createWhile and createFor: allocate NODE_WHILE / NODE_FOR and store
- * their children.  Set node->lineno = yylineno in every constructor,
- * or later phases cannot report errors against the right line.
+ * createWhile: allocate NODE_WHILE and store its children (createFor
+ * above shows the pattern).  Set node->lineno = yylineno in every
+ * constructor, or later phases cannot report errors against the
+ * right line.
  * -------------------------------------------------------------- */
 /* Create a block statement node */
 ASTNode* createBlock(ASTNode* stmt_list) {
@@ -310,10 +325,27 @@ void printAST(ASTNode* node, int level) {
                 printAST(node->data.ret.expr, level + 1);
             }
             break;
+        case NODE_FOR: {
+            /* Label each of the four children so init and update can be
+             * told apart at a glance; a missing part prints as (none). */
+            const char* label[4] = { "INIT:", "COND:", "UPDATE:", "BODY:" };
+            ASTNode* part[4] = { node->data.for_stmt.init, node->data.for_stmt.condition,
+                                 node->data.for_stmt.update, node->data.for_stmt.body };
+            printf("FOR\n");
+            for (int k = 0; k < 4; k++) {
+                for (int i = 0; i < level + 1; i++) printf("  ");
+                if (part[k]) {
+                    printf("%s\n", label[k]);
+                    printAST(part[k], level + 2);
+                } else {
+                    printf("%s (none%s)\n", label[k], k == 1 ? " - loops forever" : "");
+                }
+            }
+            break;
+        }
 /* --------------------------------------------------------------
  * TODO (Topic 4)
- * Print NODE_WHILE and NODE_FOR.  Label each of the for-loop's four
- * children so a reader can tell init from update at a glance.
+ * Print NODE_WHILE.  (NODE_FOR above shows how to label children.)
  * -------------------------------------------------------------- */
         case NODE_BLOCK:
             printf("BLOCK\n");

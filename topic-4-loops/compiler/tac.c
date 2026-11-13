@@ -77,7 +77,11 @@ char* allocTemp() {
 }
 
 void freeTemp(char* temp) {
-    if (!temp || temp[0] != 't') return;
+    /* Only compiler temporaries (t0, t1, ...) are recycled.  Checking just the
+     * first letter is not enough: a user variable such as `total` would be
+     * read as t0 (atoi("otal") == 0) and free a temporary that is still live. */
+    if (!temp || temp[0] != 't' || !temp[1]) return;
+    for (const char* p = temp + 1; *p; p++) if (*p < '0' || *p > '9') return;
 
     int tempNum = atoi(temp + 1);
     if (!tempAlloc.allocated[tempNum]) return;
@@ -89,11 +93,20 @@ void freeTemp(char* temp) {
     }
 }
 
-/* --------------------------------------------------------------
- * TODO (Topic 4)
- * newLabel(): hand out a fresh jump target — "L0", "L1", ...  Every
- * loop, branch and switch needs its own, and they must never repeat.
- * -------------------------------------------------------------- */
+/* newLabel(): hand out a fresh jump target — "L0", "L1", ...
+ *
+ * The counter lives in tacList and is never reset or reused (unlike
+ * temporaries, which are recycled by allocTemp/freeTemp).  A label names a
+ * single place in the WHOLE program, and MIPS labels are global to the .s
+ * file, so two functions must never both own an "L3".  They cannot clash with
+ * user names either: functions are emitted as fn_<name> and globals as
+ * g_<name> by codegen.c, so a bare "L<n>" is always ours. */
+char* newLabel() {
+    char* label = malloc(16);
+    sprintf(label, "L%d", tacList.labelCount++);
+    trace("    [TAC LABEL] New label %s\n", label);
+    return label;
+}
 
 void printTempAllocatorState() {
     trace("\n┌──────────────────────────────────────────────────────────┐\n");
@@ -138,17 +151,50 @@ void appendOptimizedTAC(TACInstr* instr) {
  * When entering a switch, for, or while, push the "end" label so that any
  * nested NODE_BREAK can emit GOTO to the right exit point.
  */
-/* --------------------------------------------------------------
- * TODO (Topic 4)
- * The break-label stack.  When you start generating a loop you push the
- * loop's exit label; when you finish you pop it.  A `break` anywhere in
- * between just jumps to whatever is on top.  That one stack is the whole
- * implementation of `break`, including the nested case.
- * -------------------------------------------------------------- */
+/*
+ * Why a stack: loops nest, and `break` always leaves the INNERMOST one.
+ *
+ *     while (a) {            push L1        stack: [L1]
+ *         while (b) {        push L3        stack: [L1, L3]
+ *             break;         GOTO L3        (top of stack)
+ *         }                  pop            stack: [L1]
+ *         break;             GOTO L1        (top of stack)
+ *     }                      pop            stack: []
+ *
+ * The stack only exists while TAC is being generated; by the time the
+ * optimizer and code generator run, every break is already a plain GOTO.
+ * Topic 5 will push switch exit labels onto this same stack.
+ */
+#define MAX_BREAK_DEPTH 64
+
+static char* breakStack[MAX_BREAK_DEPTH];
+static int   breakTop = 0;          /* number of labels currently on the stack */
+
+static void pushBreakLabel(char* label) {
+    if (breakTop >= MAX_BREAK_DEPTH) {
+        fprintf(stderr, "ERROR: loops nested more than %d deep\n", MAX_BREAK_DEPTH);
+        exit(1);
+    }
+    breakStack[breakTop++] = label;
+    trace("    [TAC BREAK] push %s (depth %d)\n", label, breakTop);
+}
+
+static void popBreakLabel(void) {
+    if (breakTop > 0) {
+        breakTop--;
+        trace("    [TAC BREAK] pop  %s (depth %d)\n", breakStack[breakTop], breakTop);
+    }
+}
+
+/* Label a `break` should jump to, or NULL when no loop encloses it. */
+static char* currentBreakLabel(void) {
+    return breakTop > 0 ? breakStack[breakTop - 1] : NULL;
+}
 
 /* Forward declarations */
 static void generateTACStmt(ASTNode* node);
 static int generateArgTAC(ASTNode* arg);
+static void generateLoop(ASTNode* init, ASTNode* cond, ASTNode* update, ASTNode* body);
 
 /* Recursively generate TAC for function call arguments, returns count */
 static int generateArgTAC(ASTNode* arg) {
@@ -208,10 +254,17 @@ char* generateTACExpr(ASTNode* node) {
                 case '-': op = TAC_SUB; break;
                 case '*': op = TAC_MUL; break;
                 case '/': op = TAC_DIV; break;
-/* --------------------------------------------------------------
- * TODO (Topic 4)
- * Map the six relational operator codes to their TAC opcodes.
- * -------------------------------------------------------------- */
+                /* Relational operators (Topic 4).  The parser packs each
+                 * operator into one char, so the two-character ones use
+                 * letter codes (see opText() in ast.c).  Every comparison
+                 * produces 1 (true) or 0 (false) in an ordinary int temp;
+                 * there is no separate boolean type in this language. */
+                case '<': op = TAC_LT; break;
+                case '>': op = TAC_GT; break;
+                case 'l': op = TAC_LE; break;  /* <= */
+                case 'g': op = TAC_GE; break;  /* >= */
+                case 'e': op = TAC_EQ; break;  /* == */
+                case 'n': op = TAC_NE; break;  /* != */
                 case 'u': op = TAC_NEG; break; /* unary - */
                 default:  op = TAC_ADD; break;
             }
@@ -315,28 +368,27 @@ static void generateTACStmt(ASTNode* node) {
             break;
         }
 
-/* --------------------------------------------------------------
- * TODO (Topic 4)
- * Lower NODE_WHILE and NODE_FOR to labels and jumps.
- *
- *   while (c) B          for (init; c; upd) B
- *   ───────────          ────────────────────
- *   Lstart:              <init>
- *     t = c              Lstart:
- *     IF_FALSE t -> Lend   t = c
- *     B                    IF_FALSE t -> Lend
- *     GOTO Lstart          B
- *   Lend:                  <upd>
- *                          GOTO Lstart
- *                        Lend:
- *
- * Notice that a for-loop is a while-loop with two extra pieces —
- * which is why many compilers desugar `for` into `while` and reuse
- * the code below.  Either approach is fine; say which you chose.
- *
- * Push Lend on the break-label stack around the BODY so that a
- * `break` inside knows where to jump, and pop it afterward.
- * -------------------------------------------------------------- */
+        /* ── LOOPS (Topic 4) ─────────────────────────────────────────────
+         * Both loop kinds go through ONE lowering routine, generateLoop().
+         * A while-loop is simply a for-loop with no init and no update,
+         * so `while (c) B` is treated as `for (; c; ) B`.  This is the
+         * desugaring approach: one code path to get right, and the two
+         * loops can never drift apart in behaviour.  See generateLoop()
+         * below for the label/jump shape that is produced. */
+        case NODE_WHILE:
+            generateLoop(NULL,
+                         node->data.while_stmt.condition,
+                         NULL,
+                         node->data.while_stmt.body);
+            break;
+
+        case NODE_FOR:
+            generateLoop(node->data.for_stmt.init,
+                         node->data.for_stmt.condition,
+                         node->data.for_stmt.update,
+                         node->data.for_stmt.body);
+            break;
+
         case NODE_BLOCK:
             generateTACStmtList(node->data.block.stmt_list);
             break;
@@ -368,15 +420,87 @@ static void generateTACStmt(ASTNode* node) {
             break;
         }
 
-/* --------------------------------------------------------------
- * TODO (Topic 4)
- * Lower NODE_BREAK: emit GOTO to the label on top of the break-label
- * stack.  If the stack is empty the semantic analyzer should already
- * have rejected the program, so this is a belt-and-braces check.
- * -------------------------------------------------------------- */
+        /* ── BREAK (Topic 4) ─────────────────────────────────────────────
+         * A break is just an unconditional jump to the exit label of the
+         * innermost enclosing loop — whatever is on top of the stack. */
+        case NODE_BREAK: {
+            char* target = currentBreakLabel();
+            if (!target) {
+                /* semantic.c rejects `break` outside a loop before we ever
+                 * get here, so reaching this means the front end let one
+                 * through.  Report it rather than emit a jump to nowhere. */
+                fprintf(stderr, "Internal error (line %d): 'break' outside of a loop "
+                                "reached TAC generation\n", node->lineno);
+                break;
+            }
+            appendTAC(createTAC(TAC_GOTO, target, NULL, NULL));
+            break;
+        }
+
         default:
             break;
     }
+}
+
+/* ==========================================================================
+ * LOOP LOWERING (Topic 4)
+ * --------------------------------------------------------------------------
+ * Turns a structured loop into flat labels and jumps.  The machine has no
+ * idea what a "loop" is; all it can do is test a value and jump.
+ *
+ *   for (init; c; upd) B            while (c) B   ==  for (; c; ) B
+ *   ────────────────────
+ *       <init>                      (no init)
+ *   Lstart:
+ *       t = c
+ *       IF_FALSE t GOTO Lend        leave as soon as the test is 0
+ *       <B>                         a `break` in here is GOTO Lend
+ *       <upd>                       (no update)
+ *       GOTO Lstart                 back edge: test again
+ *   Lend:
+ *
+ * This is the "test at the top" shape: the condition runs before the first
+ * iteration, so a loop whose condition starts false runs its body zero times.
+ *
+ * Missing condition: `for (;;)` (cond == NULL) is an INFINITE loop, the same
+ * as in C.  We emit no test at all rather than a test of the constant 1 —
+ * the only way out is a `break` (or a `return`).
+ *
+ * The break-label stack bracket covers only the BODY.  It is pushed after
+ * the condition is generated, so a break can never belong to the test, and
+ * popped before the update, which is not part of the body either.  Because
+ * Lend is pushed by THIS loop, a nested loop pushes its own Lend on top and
+ * an inner break leaves only the inner loop.
+ * ========================================================================*/
+static void generateLoop(ASTNode* init, ASTNode* cond, ASTNode* update, ASTNode* body) {
+    char* startLabel = newLabel();     /* top of the loop: the test        */
+    char* endLabel   = newLabel();     /* first instruction after the loop */
+
+    /* init runs exactly once, BEFORE the start label, so the back edge
+     * does not re-run it. */
+    if (init) generateTACStmt(init);
+
+    appendTAC(createTAC(TAC_LABEL, NULL, NULL, startLabel));
+
+    if (cond) {
+        char* t = generateTACExpr(cond);
+        appendTAC(createTAC(TAC_IF_FALSE, t, endLabel, NULL));
+        freeTemp(t);                   /* free only AFTER the branch has used it */
+    }
+
+    pushBreakLabel(endLabel);
+    generateTACStmt(body);
+    popBreakLabel();
+
+    if (update) generateTACStmt(update);
+
+    appendTAC(createTAC(TAC_GOTO, startLabel, NULL, NULL));
+    appendTAC(createTAC(TAC_LABEL, NULL, NULL, endLabel));
+
+    /* createTAC duplicated both strings, so our copies can go.  The break
+     * stack no longer refers to endLabel because it was popped above. */
+    free(startLabel);
+    free(endLabel);
 }
 
 /* Recursively generate TAC for function parameters */
@@ -828,15 +952,30 @@ static TACList optimizePass(TACList* in) {
             optStats.constFold++; changesThisPass++;
         }
 
-/* --------------------------------------------------------------
- * TODO (Topic 4)
- * BRANCH SIMPLIFICATION.  Once constant folding has run, a condition
- * may be a literal:  IF_FALSE 0 GOTO L  always jumps, and
- * IF_FALSE 1 GOTO L  never does.  Rewrite the first as GOTO L and
- * delete the second.  Deleting it is what makes the code AFTER it
- * unreachable, which is what lets the next pass remove that too —
- * a small demonstration of why passes must run to a fixed point.
- * -------------------------------------------------------------- */
+        /* --- 7. BRANCH SIMPLIFICATION (Topic 4) --------------------------
+         * Constant propagation above may have turned the condition of a
+         * conditional branch into a literal.  Then the branch's outcome is
+         * known at compile time:
+         *
+         *   IF_FALSE 0 GOTO L    always jumps  ->  GOTO L
+         *   IF_FALSE k GOTO L    never jumps   ->  (deleted)      k != 0
+         *   IF_TRUE  k GOTO L    always jumps  ->  GOTO L         k != 0
+         *   IF_TRUE  0 GOTO L    never jumps   ->  (deleted)
+         *
+         * Turning a branch into a GOTO sets the `unreachable` flag below, so
+         * the code between it and the next label disappears on the next
+         * pass — e.g. the whole body of  while (0) { ... }.  Deleting a
+         * never-taken branch leaves its condition temporary unread, so dead
+         * code elimination removes that on the next pass.  Neither follow-on
+         * happens in the same pass, which is exactly why the optimizer runs
+         * until a pass changes nothing. */
+        if (!emit && (c->op == TAC_IF_FALSE || c->op == TAC_IF_TRUE) && isConstantNumber(a1)) {
+            int condTrue = (atol(a1) != 0);
+            int jumps    = (c->op == TAC_IF_FALSE) ? !condTrue : condTrue;
+            optStats.branch++; changesThisPass++;
+            if (!jumps) continue;                       /* fall through: drop it */
+            emit = createTAC(TAC_GOTO, a2, NULL, NULL); /* always taken: plain jump */
+        }
 
         /* Nothing rewrote it: keep the instruction, with propagated operands. */
         if (!emit) emit = createTAC(c->op, a1, a2, c->result);
