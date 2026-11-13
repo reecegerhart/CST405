@@ -36,62 +36,68 @@ Language design decisions agreed for this topic:
 
 ## Reece Gerhart
 
+The `for` loop and the relational operators are already working end to end (see Stylianos's section), so they can be used as a worked example. What is left in the front end is `while` and `break`. Each spot is still marked `TODO (Topic 4)` in the source.
+
 ### `scanner.l`
 
-**Tokens for Loops and Relational Operators**
+**Tokens for `while` and `break`**
 
-* Return `WHILE`, `FOR`, and `BREAK` for the loop keywords. Place them above the identifier rule so they are not scanned as an `ID`.
-* Return `LE`, `GE`, `EQ`, and `NE` for `<=`, `>=`, `==`, and `!=`. They need their own rules. Without a `<=` rule, flex would match `<` and then `=` and the parser would see two tokens.
-* Return `'<'` and `'>'` for the single-character relational operators. Confirm that `=` on its own still returns the assignment token.
+* Return `WHILE` and `BREAK` for the keywords. Place them next to the existing `"for"` rule, above the identifier rule, so they are not scanned as an `ID`.
 
 ### `parser.y`
 
-**Grammar for Loops and Relational Precedence**
+**Grammar for `while` and `break`**
 
-Declarations and precedence:
-
-* Declare the tokens `WHILE FOR BREAK` and `LE GE EQ NE`. The single-character `<` and `>` arrive as character literals and need no `%token`.
-* Declare `%type <node>` for `while_stmt`, `for_stmt`, `for_init`, `for_cond`, `for_update`, and `break_stmt`.
-* Give the relational operators their precedence: one `%left` line **above** (looser than) `'+' '-'`. That is what makes `a + 1 < b * 2` parse as `(a + 1) < (b * 2)`. This is the "order of operations" requirement of the assignment.
-
-Statements:
-
-* `stmt`: Add `while_stmt`, `for_stmt`, and `break_stmt` as new alternatives.
+* Declare the tokens `WHILE BREAK`, next to the existing `%token FOR`.
+* Declare `%type <node>` for `while_stmt` and `break_stmt`.
+* `stmt`: Add `while_stmt` and `break_stmt` as new alternatives, next to the existing `for_stmt`.
 * `while_stmt`: `WHILE '(' expr ')' stmt` builds `createWhile($3, $5)`.
-* `for_stmt`: `FOR '(' for_init ';' for_cond ';' for_update ')' stmt` builds `createFor($3, $5, $7, $9)`.
-* `for_init` and `for_update`: `ID '=' expr` (no semicolon) builds `createAssign`, or empty, which yields `NULL`.
-* `for_cond`: `expr`, or empty, which yields `NULL` (an infinite loop).
 * `break_stmt`: `BREAK ';'` builds `createBreak()`.
-
-Expressions:
-
-* Add the six relational operators to `expr`, each building `createBinOp` with the op codes in the table above.
-
-Free identifier strings returned by the scanner after passing them to AST constructors, since the constructors duplicate them.
 
 ### `ast.c`
 
-**Loop Constructors and Tree Printer**
+**`while` and `break` Constructors and Tree Printer**
 
-* Implement `createWhile`, `createFor`, and `createBreak`, using the field names in `ast.h`. Set `node->lineno = yylineno` in each one so later phases report errors against the right line.
+* Implement `createWhile` and `createBreak`, using the field names in `ast.h`. `createFor` shows the pattern. Set `node->lineno = yylineno` in each one so later phases report errors against the right line.
 * `createBreak` stores no data. What `break` means depends only on where it appears.
-* Extend `printAST` for `NODE_WHILE` and `NODE_FOR`. Label each of the for-loop's four children (`init`, `cond`, `update`, `body`) so they can be told apart, and print `(none)` for a `NULL` child.
-* Extend `printAST` for `NODE_BREAK` as a single line with no children.
+* Extend `printAST` for `NODE_WHILE` (label the condition and the body, like the existing `NODE_FOR` case) and for `NODE_BREAK` (one line, no children).
 
 ### `semantic.c`
 
-**Break Depth and Loop Checking**
+**Break Depth and `while` Checking**
 
 * Add a `breakDepth` counter: how many loops enclose the statement being checked. Reset it in `initSemantic`.
 * `NODE_WHILE`: Check the condition, then check the body with `breakDepth++` before and `breakDepth--` after.
-* `NODE_FOR`: Check `init`, `condition`, and `update` when they are not `NULL`, and bracket only the body with `breakDepth++` / `breakDepth--`.
+* `NODE_FOR`: This case already checks all four children. Add `breakDepth++` / `breakDepth--` around the body check, which is marked with a TODO.
 * `NODE_BREAK`: Report an error when `breakDepth == 0` (a `break` outside any loop). No grammar can express this rule, which is why semantic analysis exists.
 
 When an error occurs, report the line number using `node->lineno`, say what is wrong and how to fix it, increment `semInfo.errorCount`, and keep checking.
 
+**Done when** `make test` passes `t4_01_while` (`55 10`) and `t4_03_break` (`21 4`). The other `t4_*` and all `t3_*` tests already pass.
+
 ---
 
 ## Stylianos Regas
+
+### Front end for the `for` loop
+
+**`for` and the Relational Operators, End to End**
+
+So that a loop works through the whole compiler, the `for` loop and the comparison operators it needs were added to the front end. `while` and `break` are left for Reece.
+
+* `scanner.l`: Returns `FOR`, plus `LE GE EQ NE` and `'<' '>'`.
+* `parser.y`:
+  * Adds the `for_stmt`, `for_init`, `for_cond`, and `for_update` rules. Each part of the header can be empty and yields `NULL`.
+  * `for_init` and `for_update` are `ID '=' expr` without a semicolon.
+  * Adds the six relational operators to `expr`.
+  * Relational precedence follows C: `%left EQ NE`, then `%left '<' '>' LE GE`, both looser than `+ -`. So `a + 1 < b * 2` parses as `(a + 1) < (b * 2)`, which covers the assignment's order of operations requirement.
+* `ast.c`: Adds `createFor` and the `NODE_FOR` case of `printAST`, which labels `INIT`, `COND`, `UPDATE`, and `BODY` and prints `(none)` for a missing part.
+* `semantic.c`: Adds the `NODE_FOR` case, which checks `init`, `condition`, `body`, and `update`. An undeclared loop variable gets the normal undeclared-variable error.
+
+Verified with `make test` under SPIM:
+
+* `t4_02_for` prints `30 120`, `t4_04_nested` prints `225 9`, `t4_05_relational` prints `1 0 1 0 1 0`, and `t4_06_optimize` prints `10`.
+* All Topic 3 tests still pass, and bison reports no grammar conflicts.
 
 ### `ast.h`
 
@@ -151,7 +157,7 @@ spim -file /tmp/t4_01_while.s
 ## Shared
 
 * **Interface agreement:** The node kinds, field names, and op codes are listed at the top of this file and already in `ast.h`. Reece reads `ast.h` and implements the constructors. Stylianos's code reads from it.
-* **Branches:** Stylianos works on `StyliBranchTopic4` and Reece works on `main`. The two halves touch different files (the only shared file is `ast.h`, and Reece only needs to read it), so merging should not conflict.
+* **Branches:** Stylianos works on `StyliBranchTopic4` and Reece works on `main`. Reece should start from this branch, or merge it in first, because his remaining TODOs sit next to the `for` code in the same four front-end files. Starting from the scaffold on `main` would mean redoing the `for` work and causing merge conflicts.
 * **Testing:** Until the front end is finished, the back end is tested with `tests/backend/loop_backend_test.c`. Once both halves are merged, `make test` must pass all six `t4_*` tests plus the Topic 3 `t3_*` tests.
 * **Videos:** Each of us records our own video covering how the code works, the tasks we did (from this file), the language design choices above, and a live run.
 * **Write-up notes:** Mention that `for` is desugared into the same lowering as `while`, that a missing `for` condition is an infinite loop, that `break` is resolved entirely in TAC generation by the label stack, and that the register cache must be flushed at every label and branch.

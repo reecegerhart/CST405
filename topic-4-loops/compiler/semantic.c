@@ -535,9 +535,23 @@ static void checkStmt(ASTNode* node) {
             }
             break;
 
+        /* For loop (Topic 4): visit every child that is present.  init
+         * and update are ordinary assignments, so checkStmt reports an
+         * undeclared loop variable exactly as it would anywhere else.
+         * The condition is an expression and is checked as one. */
+        case NODE_FOR:
+            checkStmt(node->data.for_stmt.init);
+            checkExpr(node->data.for_stmt.condition);
+            /* TODO (Topic 4, Reece): bracket this body check with
+             * breakDepth++ / breakDepth-- once breakDepth exists. */
+            checkStmt(node->data.for_stmt.body);
+            checkStmt(node->data.for_stmt.update);
+            trace("  ✓ For loop checked (line %d)\n", node->lineno);
+            break;
+
 /* --------------------------------------------------------------
  * TODO (Topic 4)
- * Check NODE_WHILE and NODE_FOR.  Two things matter here:
+ * Check NODE_WHILE (NODE_FOR is done above).  Two things matter here:
  *   • visit every child (condition, body, and for-loop init/update)
  *   • bracket the BODY with breakDepth++ / breakDepth-- so that a
  *     `break` inside it is recognized as legal
