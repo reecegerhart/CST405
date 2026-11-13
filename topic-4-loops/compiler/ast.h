@@ -42,12 +42,12 @@ typedef enum {
     NODE_FUNC_CALL,   /* Function call */
     NODE_ARG_LIST,    /* Argument list */
     NODE_RETURN,      /* Return statement */
-/* --------------------------------------------------------------
- * TODO (Topic 4)
- * Add the loop node kinds to this enum:
- *   NODE_WHILE, NODE_FOR, NODE_BREAK
- * -------------------------------------------------------------- */
-    NODE_BLOCK,       /* Block statement { ... } */
+    /* Topic 4 — loops.  (Interface agreed between front end and back end:
+     * the parser builds these, tac.c lowers them to labels and jumps.) */
+    NODE_WHILE,       /* while (cond) body */
+    NODE_FOR,         /* for (init; cond; update) body */
+    NODE_BREAK,       /* break;  — leaves the innermost enclosing loop */
+    NODE_BLOCK,      /* Block statement { ... } */
     NODE_ARRAY_DECL,  /* Array declaration (e.g., int arr[10] or int arr[]) */
     NODE_ARRAY_INDEX, /* Array indexing (e.g., arr[i]) */
 } NodeType;
@@ -133,16 +133,30 @@ typedef struct ASTNode {
             struct ASTNode* expr;       /* Expression to return (NULL for void) */
         } ret;
 
-/* --------------------------------------------------------------
- * TODO (Topic 4)
- * A NODE_WHILE needs a condition and a body.
- * -------------------------------------------------------------- */
-/* --------------------------------------------------------------
- * TODO (Topic 4)
- * A NODE_FOR needs FOUR children: init, condition, update, body.
- * Any of them may be NULL, because every part of a for-header is
- * optional.  Decide now what "condition is NULL" should mean.
- * -------------------------------------------------------------- */
+        /* While loop (NODE_WHILE) */
+        struct {
+            struct ASTNode* condition;  /* Loop test, re-evaluated before every iteration */
+            struct ASTNode* body;       /* Statement (usually a block) run while the test is non-zero */
+        } while_stmt;
+
+        /* For loop (NODE_FOR)
+         * Every part of a for-header is optional, so any child may be NULL.
+         *   init      == NULL  ->  nothing runs before the loop
+         *   condition == NULL  ->  the loop is INFINITE, exactly as in C:
+         *                          for (;;) { ... } only exits through break
+         *   update    == NULL  ->  nothing runs after each iteration
+         *   body      == NULL  ->  empty body
+         * init and update are assignment nodes (NODE_ASSIGN) WITHOUT a
+         * trailing semicolon; the semicolons belong to the for-header. */
+        struct {
+            struct ASTNode* init;       /* Runs once, before the first test */
+            struct ASTNode* condition;  /* Loop test (NULL = always true)  */
+            struct ASTNode* update;     /* Runs after each iteration of the body */
+            struct ASTNode* body;       /* Loop body */
+        } for_stmt;
+
+        /* NODE_BREAK carries no data: what it means depends only on WHERE
+         * it appears, which tac.c resolves with its break-label stack. */
         /* Block statement (NODE_BLOCK) */
         struct {
             struct ASTNode* stmt_list;  /* Statements in block */
@@ -186,13 +200,11 @@ ASTNode* createReturn(ASTNode* expr);                           /* Create return
 
 /* Control flow nodes */
 ASTNode* createBlock(ASTNode* stmt_list);                       /* Create block statement */
-/* --------------------------------------------------------------
- * TODO (Topic 4)
- * Declare the constructors for the loop nodes:
- *   createWhile(condition, body)
- *   createFor(init, condition, update, body)
- *   createBreak()
- * -------------------------------------------------------------- */
+/* Loop nodes (Topic 4) — implemented in ast.c */
+ASTNode* createWhile(ASTNode* condition, ASTNode* body);       /* Create while loop */
+ASTNode* createFor(ASTNode* init, ASTNode* condition,
+                   ASTNode* update, ASTNode* body);            /* Create for loop (any part may be NULL) */
+ASTNode* createBreak(void);                                    /* Create break statement */
 
 /* Array nodes */
 ASTNode* createArrayDecl(char* name, int size);                 /* Create array declaration */

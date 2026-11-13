@@ -412,14 +412,17 @@ static const char* mnemonicFor(TACOp op) {
         case TAC_SUB: return "sub";
         case TAC_MUL: return "mul";
         case TAC_DIV: return "div";
-/* --------------------------------------------------------------
- * TODO (Topic 4)
- * MIPS has a "set on condition" instruction for each comparison, and
- * SPIM supplies three-operand pseudo-instructions for all six:
- *   slt  sgt  sle  sge  seq  sne
- * Each writes 1 or 0 into the destination register, which is exactly
- * the 1/0 our language says a comparison produces.
- * -------------------------------------------------------------- */
+        /* Relational operators (Topic 4).  Each "set on condition"
+         * instruction writes 1 into the destination when the comparison
+         * holds and 0 when it does not — exactly the 1/0 value a comparison
+         * has in our language.  Only slt is a real MIPS instruction; SPIM
+         * expands the other five pseudo-instructions into short sequences. */
+        case TAC_LT:  return "slt";
+        case TAC_GT:  return "sgt";
+        case TAC_LE:  return "sle";
+        case TAC_GE:  return "sge";
+        case TAC_EQ:  return "seq";
+        case TAC_NE:  return "sne";
         default:      return NULL;
     }
 }
@@ -520,12 +523,10 @@ void generateMIPSFromTAC(const char* filename) {
 
             /* ---------- arithmetic, comparison ---------------------------- */
             case TAC_ADD: case TAC_SUB: case TAC_MUL: case TAC_DIV:
-/* --------------------------------------------------------------
- * TODO (Topic 4)
- * The relational opcodes emit exactly like the arithmetic ones —
- * two operands in, one register out — so just add their case labels
- * to this group.  Six labels, no new code.
- * -------------------------------------------------------------- */
+            /* Comparisons have the same shape as arithmetic — two operands
+             * in, one register out — so they share this code (Topic 4). */
+            case TAC_LT:  case TAC_GT:  case TAC_LE:
+            case TAC_GE:  case TAC_EQ:  case TAC_NE:
             {
                 int a = operandReg(i->arg1);
                 int b = operandReg(i->arg2);
@@ -561,21 +562,55 @@ void generateMIPSFromTAC(const char* filename) {
                 break;
             }
 
-/* --------------------------------------------------------------
- * TODO (Topic 4)
- * CONTROL FLOW.  Four TAC opcodes become four MIPS instructions:
- *   LABEL L      ->   L:
- *   GOTO L       ->   j    L
- *   IF_FALSE t L ->   beq  $t, $zero, L
- *   IF_TRUE  t L ->   bne  $t, $zero, L
- *
- * The subtle part is the register cache.  Two different paths can reach
- * the same label with different values cached in $t0-$t9, so at every
- * label and every branch you must write back what is dirty and then
- * forget everything.  Skip that and your loops will produce beautiful,
- * wrong answers.  Call flushRegisters() — and think about WHERE in the
- * branch cases it has to go relative to reading the condition register.
- * -------------------------------------------------------------- */
+            /* ---------- control flow (Topic 4) ----------------------------
+             * Four TAC opcodes, four MIPS instructions:
+             *   LABEL L      ->   L:
+             *   GOTO L       ->   j    L
+             *   IF_FALSE t L ->   beq  $t, $zero, L
+             *   IF_TRUE  t L ->   bne  $t, $zero, L
+             *
+             * THE REGISTER CACHE RULE.  The allocator remembers which
+             * variable lives in which $t register, but that memory is only
+             * true along ONE path through the code.  A label can be reached
+             * from several places (fall-through from above, and the back
+             * edge of a loop), each with a different cache.  So at every
+             * label and before every jump we write back every dirty value
+             * (flushRegisters) and forget the cache, so that whichever path
+             * arrives, memory holds the truth and the code after the label
+             * reloads what it needs.
+             *
+             * ORDER MATTERS in the conditional branches: the condition is
+             * read into a register FIRST, then registers are flushed, then
+             * the branch tests that register.  Flushing only stores to
+             * memory, so the register still holds the condition.  Flushing
+             * first would make operandReg reload it — harmless but wasted —
+             * and, worse, flushing AFTER the branch would mean the store
+             * never happens on the path that jumps. */
+            case TAC_LABEL:
+                flushRegisters("end of block: label can be reached from several paths");
+                fprintf(out, "%s:\n", i->result);
+                break;
+
+            case TAC_GOTO:
+                flushRegisters("before jump");
+                fprintf(out, "    j    %s\n", i->arg1);
+                break;
+
+            case TAC_IF_FALSE: {
+                int c = operandReg(i->arg1);          /* 1. read the condition */
+                flushRegisters("before branch");      /* 2. write back, forget  */
+                fprintf(out, "    beq  $t%d, $zero, %s     # if %s == 0 goto %s\n",
+                        c, i->arg2, i->arg1, i->arg2); /* 3. branch on it */
+                break;
+            }
+
+            case TAC_IF_TRUE: {
+                int c = operandReg(i->arg1);
+                flushRegisters("before branch");
+                fprintf(out, "    bne  $t%d, $zero, %s     # if %s != 0 goto %s\n",
+                        c, i->arg2, i->arg1, i->arg2);
+                break;
+            }
 
             /* ---------- calls --------------------------------------------- */
             case TAC_ARG:
