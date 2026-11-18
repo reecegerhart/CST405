@@ -203,7 +203,7 @@ Each member also recorded an individual video that explains the code, outlines t
 | Member | Video |
 |---|---|
 | Reece Gerhart | *[paste link]* |
-| Stylianos Regas | *[paste link]* |
+| Stylianos Regas | https://mygcuedu6961-my.sharepoint.com/:v:/g/personal/sregas_my_gcu_edu/IQAtN0H92RbpSIpgnG7R9x4RAQALjTx1hY6Iw95ekFCiH3s?e=2flTgj |
 
 ## 10. Known limitations
 
